@@ -1,15 +1,8 @@
 # ============================================================
 # AI QUEST GAME (Streamlit) — UI + ALL 7 Algorithms (Single File)
-# Modern, clean UI + beginner-friendly code
-#
-# Algorithms included:
-# 1) BFS (Shortest path)
-# 2) DFS (A path, not always shortest)
-# 3) A* (Shortest + fewer nodes using heuristic)
-# 4) Hill Climbing (Greedy + random restart)
-# 5) Minimax (Wizard vs Enemy, small 6x6 demo)
-# 6) CSP (Validate solvable dungeon by placing walls + backtracking)
-# 7) K-Means (Cluster open cells into zones)
+# Fixes:
+# 1) Status panel updates live (uses a placeholder)
+# 2) Text visibility fixed for dark/light themes (stronger CSS)
 # ============================================================
 
 import streamlit as st
@@ -27,11 +20,19 @@ st.set_page_config(
 )
 
 # ============================================================
-# MODERN CSS (Cards + Grid)
+# MODERN CSS (Cards + Grid) + VISIBILITY FIX
 # ============================================================
 APP_CSS = """
 <style>
 .block-container { max-width: 1050px; padding-top: 1.1rem; padding-bottom: 2rem; }
+
+/* Force readable text on our custom cards even in dark theme */
+.card, .card * {
+  color: #0f172a !important; /* slate-900 */
+}
+.hero-subtitle, .muted {
+  color: rgba(15, 23, 42, 0.70) !important;
+}
 
 .card {
   background: #ffffff;
@@ -42,8 +43,14 @@ APP_CSS = """
 }
 
 .hero-title { font-size: 2.2rem; font-weight: 850; letter-spacing: -0.02em; margin: 0; }
-.hero-subtitle { margin-top: 0.25rem; color: rgba(30, 41, 59, 0.75); font-size: 1.05rem; }
-.muted { color: rgba(30, 41, 59, 0.65); font-size: 0.95rem; }
+.hero-subtitle { margin-top: 0.25rem; font-size: 1.05rem; }
+.muted { font-size: 0.95rem; }
+
+/* Background: keep dark like your screenshot */
+.stApp {
+  background: radial-gradient(1200px 800px at 20% 0%, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.00) 60%),
+              #070b14;
+}
 
 .grid-wrap { display: flex; justify-content: center; }
 .board {
@@ -53,7 +60,7 @@ APP_CSS = """
   border-radius: 18px;
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
   border: 1px solid rgba(0,0,0,0.06);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
 }
 
 .cell {
@@ -108,6 +115,9 @@ APP_CSS = """
   overflow-y: auto;
   white-space: pre-wrap;
 }
+
+/* Make Streamlit default text readable against dark background */
+html, body, [class*="css"]  { color: #e5e7eb; }
 </style>
 """
 st.markdown(APP_CSS, unsafe_allow_html=True)
@@ -184,8 +194,7 @@ def reconstruct_path(parent_map, start, goal):
 
 # ============================================================
 # SECTION 2–4: PATHFINDING (BFS / DFS / A* / Hill Climbing)
-# Implemented as generators so Streamlit can animate
-# Each yield: visited_set, path_or_None, log_message
+# Generators for animation: yields (visited, path_or_none, message)
 # ============================================================
 
 def bfs_steps(grid, start, goal):
@@ -298,7 +307,6 @@ def hill_climbing_steps(grid, start, goal, max_restarts=10, max_steps=200):
     cur = start
     total_path = [cur]
     visited_run = set([cur])
-    nodes_explored = 0
     restarts = 0
     steps = 0
 
@@ -306,7 +314,6 @@ def hill_climbing_steps(grid, start, goal, max_restarts=10, max_steps=200):
 
     while steps < max_steps:
         steps += 1
-        nodes_explored += 1
         cur_dist = manhattan_distance(cur, goal)
         yield set(total_path), None, f"📍 At {cur}, distance={cur_dist}"
 
@@ -352,7 +359,6 @@ def hill_climbing_steps(grid, start, goal, max_restarts=10, max_steps=200):
 # ============================================================
 
 def minimax_grid_fixed_6x6():
-    # W=Wizard, E=Enemy, G=Goal, X=Wall, .=Empty
     return [
         ['W', '.', '.', 'X', '.', '.'],
         ['.', 'X', '.', '.', '.', 'X'],
@@ -401,14 +407,13 @@ def minimax_game_steps(mini_grid, wizard_start, enemy_start, goal_pos, depth=3, 
     enemy = enemy_start
     nodes_eval = 0
 
-    yield wizard, enemy, None, {"nodes": 0, "turn": 0, "result": ""}, "⚔️ Minimax game started!"
+    yield wizard, enemy, {"nodes": 0, "turn": 0, "result": ""}, "⚔️ Minimax game started!"
 
     for turn in range(1, max_turns + 1):
-        # Wizard turn (MAX)
         wr, wc = wizard
         moves = get_neighbors(mini_grid, wr, wc)
         if not moves:
-            yield wizard, enemy, None, {"nodes": nodes_eval, "turn": turn, "result": "Wizard trapped"}, "🧱 Wizard is trapped!"
+            yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": "Wizard trapped"}, "🧱 Wizard is trapped!"
             return
 
         best_move = None
@@ -421,16 +426,15 @@ def minimax_game_steps(mini_grid, wizard_start, enemy_start, goal_pos, depth=3, 
                 best_move = mv
 
         wizard = best_move
-        yield wizard, enemy, None, {"nodes": nodes_eval, "turn": turn, "result": ""}, f"🧙 Wizard moves to {wizard} (score={best_score})"
+        yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": ""}, f"🧙 Wizard moves to {wizard} (score={best_score})"
 
         if wizard == goal_pos:
-            yield wizard, enemy, None, {"nodes": nodes_eval, "turn": turn, "result": "Wizard wins"}, "🏆 Wizard wins! Reached goal."
+            yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": "Wizard wins"}, "🏆 Wizard wins! Reached goal."
             return
         if wizard == enemy:
-            yield wizard, enemy, None, {"nodes": nodes_eval, "turn": turn, "result": "Enemy wins"}, "💀 Enemy wins! Caught wizard."
+            yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": "Enemy wins"}, "💀 Enemy wins! Caught wizard."
             return
 
-        # Enemy turn (simple chase)
         er, ec = enemy
         enemy_moves = get_neighbors(mini_grid, er, ec)
         if enemy_moves:
@@ -443,16 +447,16 @@ def minimax_game_steps(mini_grid, wizard_start, enemy_start, goal_pos, depth=3, 
                     best_e = mv
             enemy = best_e
 
-        yield wizard, enemy, None, {"nodes": nodes_eval, "turn": turn, "result": ""}, f"👾 Enemy moves to {enemy} (chasing)"
+        yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": ""}, f"👾 Enemy moves to {enemy} (chasing)"
 
         if enemy == wizard:
-            yield wizard, enemy, None, {"nodes": nodes_eval, "turn": turn, "result": "Enemy wins"}, "💀 Enemy wins! Caught wizard."
+            yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": "Enemy wins"}, "💀 Enemy wins! Caught wizard."
             return
 
-    yield wizard, enemy, None, {"nodes": nodes_eval, "turn": max_turns, "result": "Draw"}, "⏳ Game ended (turn limit)."
+    yield wizard, enemy, {"nodes": nodes_eval, "turn": max_turns, "result": "Draw"}, "⏳ Game ended (turn limit)."
 
 # ============================================================
-# SECTION 7: CSP (Validate solvable by placing walls + backtracking)
+# SECTION 7: CSP
 # ============================================================
 
 def check_path_exists_bfs(test_grid, start_pos, goal_pos):
@@ -471,7 +475,6 @@ def check_path_exists_bfs(test_grid, start_pos, goal_pos):
     return False
 
 def csp_steps(base_grid, start_pos, goal_pos, attempts_limit=8, seed=7):
-    # copy
     csp_grid = [list(row) for row in base_grid]
 
     ok = check_path_exists_bfs(csp_grid, start_pos, goal_pos)
@@ -503,17 +506,17 @@ def csp_steps(base_grid, start_pos, goal_pos, attempts_limit=8, seed=7):
         still_ok = check_path_exists_bfs(csp_grid, start_pos, goal_pos)
         if still_ok:
             walls += 1
-            yield csp_grid, {"walls": walls, "backtracks": backtracks, "attempts": attempts, "path_ok": True}, f"✅ CSP: Kept wall at {pos} (path still exists)."
+            yield csp_grid, {"walls": walls, "backtracks": backtracks, "attempts": attempts, "path_ok": True}, f"✅ CSP: Kept wall at {pos}."
         else:
             csp_grid[r][c] = "."
             backtracks += 1
-            yield csp_grid, {"walls": walls, "backtracks": backtracks, "attempts": attempts, "path_ok": True}, f"↩️ CSP: Backtrack! Wall at {pos} removed (constraint violated)."
+            yield csp_grid, {"walls": walls, "backtracks": backtracks, "attempts": attempts, "path_ok": True}, f"↩️ CSP: Backtrack! Removed wall at {pos}."
 
     final_ok = check_path_exists_bfs(csp_grid, start_pos, goal_pos)
     yield csp_grid, {"walls": walls, "backtracks": backtracks, "attempts": attempts, "path_ok": final_ok}, f"🏁 CSP done. Path ok = {final_ok}"
 
 # ============================================================
-# SECTION 8: K-MEANS (Cluster open cells into zones)
+# SECTION 8: K-MEANS
 # ============================================================
 
 def euclidean_distance(p1, p2):
@@ -545,7 +548,7 @@ def recalculate_centroids(clusters, old_centroids):
     for i in clusters:
         cells = clusters[i]
         if not cells:
-            new_centroids.append(old_centroids[i])  # keep if empty cluster
+            new_centroids.append(old_centroids[i])
         else:
             avg_r = sum(p[0] for p in cells) / len(cells)
             avg_c = sum(p[1] for p in cells) / len(cells)
@@ -565,12 +568,12 @@ def kmeans_steps(grid, k=3, max_iterations=20, seed=5):
     for it in range(1, max_iterations + 1):
         clusters = assign_cells_to_clusters(open_cells, centroids)
         new_centroids = recalculate_centroids(clusters, centroids)
-
         sizes = [len(clusters[i]) for i in range(k)]
+
         yield clusters, centroids, {"iterations": it, "centroids": centroids, "sizes": sizes}, f"🔁 Iteration {it}: sizes={sizes}, new_centroids={new_centroids}"
 
         if new_centroids == centroids:
-            yield clusters, centroids, {"iterations": it, "centroids": centroids, "sizes": sizes}, "✅ Converged! Centroids stopped moving."
+            yield clusters, centroids, {"iterations": it, "centroids": centroids, "sizes": sizes}, "✅ Converged!"
             return
 
         centroids = new_centroids
@@ -582,19 +585,10 @@ def kmeans_steps(grid, k=3, max_iterations=20, seed=5):
 # ============================================================
 
 def cell_emoji(ch):
-    mapping = {
-        "A": "🤖",
-        "G": "🏆",
-        "X": "⬛",
-        "W": "🧙",
-        "E": "👾",
-    }
+    mapping = {"A": "🤖", "G": "🏆", "X": "⬛", "W": "🧙", "E": "👾"}
     return mapping.get(ch, "")
 
 def render_grid_html(grid, visited=None, path=None, overlay=None):
-    """
-    overlay is optional dict {(r,c): "zone1"/"zone2"/"zone3"/"centroid"} for K-Means.
-    """
     n = len(grid)
     visited = visited or set()
     path = path or []
@@ -608,7 +602,6 @@ def render_grid_html(grid, visited=None, path=None, overlay=None):
             ch = grid[r][c]
             pos = (r, c)
 
-            # base classes
             if ch == "X":
                 klass = "cell cell-wall"
             elif ch == "A":
@@ -620,7 +613,7 @@ def render_grid_html(grid, visited=None, path=None, overlay=None):
             elif ch == "E":
                 klass = "cell cell-enemy"
             else:
-                # overlays (kmeans zones) for open cells
+                # K-Means overlay
                 if overlay.get(pos) == "zone1":
                     klass = "cell cell-zone1"
                 elif overlay.get(pos) == "zone2":
@@ -630,7 +623,7 @@ def render_grid_html(grid, visited=None, path=None, overlay=None):
                 elif overlay.get(pos) == "centroid":
                     klass = "cell cell-centroid"
                 else:
-                    # pathfinding overlays
+                    # pathfinding overlay
                     if path and pos in path:
                         klass = "cell cell-path"
                     elif visited and pos in visited:
@@ -643,11 +636,8 @@ def render_grid_html(grid, visited=None, path=None, overlay=None):
     html += "</div></div>"
     return html
 
-def log_add(msg):
-    st.session_state.logs.append(msg)
-
 # ============================================================
-# SESSION STATE INIT
+# SESSION STATE INIT + RESET
 # ============================================================
 
 def init_state():
@@ -673,7 +663,7 @@ def init_state():
     if "selected_algo" not in st.session_state:
         st.session_state.selected_algo = "BFS"
 
-    # minimax state
+    # minimax
     if "minimax_wizard" not in st.session_state:
         st.session_state.minimax_wizard = (0, 0)
     if "minimax_enemy" not in st.session_state:
@@ -685,7 +675,7 @@ def init_state():
     if "minimax_result" not in st.session_state:
         st.session_state.minimax_result = ""
 
-    # csp state
+    # csp
     if "csp_walls" not in st.session_state:
         st.session_state.csp_walls = 0
     if "csp_backtracks" not in st.session_state:
@@ -693,7 +683,7 @@ def init_state():
     if "csp_path_ok" not in st.session_state:
         st.session_state.csp_path_ok = True
 
-    # kmeans state
+    # kmeans
     if "kmeans_overlay" not in st.session_state:
         st.session_state.kmeans_overlay = {}
     if "kmeans_iterations" not in st.session_state:
@@ -708,17 +698,23 @@ def reset_visual_state():
     st.session_state.nodes_explored = 0
     st.session_state.steps_taken = 0
     st.session_state.logs = []
+
     st.session_state.kmeans_overlay = {}
     st.session_state.kmeans_iterations = 0
     st.session_state.kmeans_centroids = []
+
     st.session_state.csp_walls = 0
     st.session_state.csp_backtracks = 0
     st.session_state.csp_path_ok = True
+
     st.session_state.minimax_turn = 0
     st.session_state.minimax_nodes = 0
     st.session_state.minimax_result = ""
     st.session_state.minimax_wizard = (0, 0)
     st.session_state.minimax_enemy = (5, 0)
+
+def log_add(msg):
+    st.session_state.logs.append(msg)
 
 init_state()
 
@@ -788,18 +784,9 @@ with st.sidebar:
 
     run_clicked = st.button("▶️ Run Algorithm", type="primary", use_container_width=True)
 
-    st.markdown("---")
-    st.markdown("### 💡 Key Insights")
-    st.caption("1) BFS: shortest but explores more")
-    st.caption("2) DFS: fast but not always shortest")
-    st.caption("3) A*: heuristic power (fewer nodes)")
-    st.caption("4) Hill Climbing: can get stuck → restarts")
-    st.caption("5) Minimax: adversarial (wizard vs enemy)")
-    st.caption("6) CSP: validates solvable dungeon")
-    st.caption("7) K-Means: clusters zones (not pathfinding)")
-
 # ============================================================
 # MAIN LAYOUT (Grid + Status + Logs)
+# Status panel uses placeholder so it updates live
 # ============================================================
 
 left, right = st.columns([1.4, 1], gap="large")
@@ -815,72 +802,76 @@ with left:
     grid_placeholder = st.empty()
 
 with right:
-    st.markdown('<div class="card"><h3 style="margin:0 0 10px 0;">📊 Status Panel</h3>', unsafe_allow_html=True)
-
-    path_len = (len(st.session_state.path) - 1) if st.session_state.path else 0
-
-    extra_line = ""
-    if st.session_state.selected_algo == "Minimax":
-        extra_line = f"<div class='badge'>⚔️ <strong>Turn:</strong> {st.session_state.minimax_turn}</div>" \
-                     f"<div class='badge'>🧮 <strong>Nodes Evaluated:</strong> {st.session_state.minimax_nodes}</div>"
-        if st.session_state.minimax_result:
-            extra_line += f"<div class='badge'>🏁 <strong>Result:</strong> {st.session_state.minimax_result}</div>"
-    if st.session_state.selected_algo == "CSP":
-        extra_line = f"<div class='badge'>🧱 <strong>Walls placed:</strong> {st.session_state.csp_walls}</div>" \
-                     f"<div class='badge'>↩️ <strong>Backtracks:</strong> {st.session_state.csp_backtracks}</div>" \
-                     f"<div class='badge'>✅ <strong>Path valid:</strong> {st.session_state.csp_path_ok}</div>"
-    if st.session_state.selected_algo == "K-Means":
-        extra_line = f"<div class='badge'>🔁 <strong>Iterations:</strong> {st.session_state.kmeans_iterations}</div>"
-
-    status_html = f"""
-    <div class="badges">
-      <div class="badge">🧠 <strong>Algorithm:</strong> {st.session_state.selected_algo}</div>
-      <div class="badge">📌 <strong>Status:</strong> {st.session_state.status}</div>
-      <div class="badge">🧭 <strong>Nodes Explored:</strong> {st.session_state.nodes_explored}</div>
-      <div class="badge">🛤️ <strong>Path Length:</strong> {path_len}</div>
-      <div class="badge">👣 <strong>Steps Taken:</strong> {st.session_state.steps_taken}</div>
-      {extra_line}
-    </div>
-    """
-    st.markdown(status_html, unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    status_placeholder = st.empty()
 
     st.write("")
     st.markdown('<div class="card"><h3 style="margin:0 0 10px 0;">🧾 Log Panel</h3>', unsafe_allow_html=True)
     log_placeholder = st.empty()
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ============================================================
-# INITIAL RENDER
-# ============================================================
+def render_status_panel():
+    path_len = (len(st.session_state.path) - 1) if st.session_state.path else 0
+
+    extra = ""
+    if st.session_state.selected_algo == "Minimax":
+        extra += f"<div class='badge'>⚔️ <strong>Turn:</strong> {st.session_state.minimax_turn}</div>"
+        extra += f"<div class='badge'>🧮 <strong>Nodes Evaluated:</strong> {st.session_state.minimax_nodes}</div>"
+        if st.session_state.minimax_result:
+            extra += f"<div class='badge'>🏁 <strong>Result:</strong> {st.session_state.minimax_result}</div>"
+
+    if st.session_state.selected_algo == "CSP":
+        extra += f"<div class='badge'>🧱 <strong>Walls placed:</strong> {st.session_state.csp_walls}</div>"
+        extra += f"<div class='badge'>↩️ <strong>Backtracks:</strong> {st.session_state.csp_backtracks}</div>"
+        extra += f"<div class='badge'>✅ <strong>Path valid:</strong> {st.session_state.csp_path_ok}</div>"
+
+    if st.session_state.selected_algo == "K-Means":
+        extra += f"<div class='badge'>🔁 <strong>Iterations:</strong> {st.session_state.kmeans_iterations}</div>"
+
+    html = f"""
+    <div class="card">
+      <h3 style="margin:0 0 10px 0;">📊 Status Panel</h3>
+      <div class="badges">
+        <div class="badge">🧠 <strong>Algorithm:</strong> {st.session_state.selected_algo}</div>
+        <div class="badge">📌 <strong>Status:</strong> {st.session_state.status}</div>
+        <div class="badge">🧭 <strong>Nodes Explored:</strong> {st.session_state.nodes_explored}</div>
+        <div class="badge">🛤️ <strong>Path Length:</strong> {path_len}</div>
+        <div class="badge">👣 <strong>Steps Taken:</strong> {st.session_state.steps_taken}</div>
+        {extra}
+      </div>
+    </div>
+    """
+    status_placeholder.markdown(html, unsafe_allow_html=True)
 
 def render_current_view():
     algo = st.session_state.selected_algo
 
-    # Choose which grid is displayed
     if algo == "Minimax":
         g = minimax_grid_fixed_6x6()
-        # put W/E on top for visualization
         wr, wc = st.session_state.minimax_wizard
         er, ec = st.session_state.minimax_enemy
-        # copy for display
         display = [list(row) for row in g]
         display[wr][wc] = "W"
         display[er][ec] = "E"
-        grid_html = render_grid_html(display, visited=set(), path=[], overlay={})
+        grid_html = render_grid_html(display)
     elif algo == "K-Means":
-        grid_html = render_grid_html(st.session_state.grid, visited=set(), path=[], overlay=st.session_state.kmeans_overlay)
-    elif algo == "CSP":
-        # grid might be modified during run; we store in st.session_state.grid directly
-        grid_html = render_grid_html(st.session_state.grid, visited=set(), path=[], overlay={})
+        grid_html = render_grid_html(st.session_state.grid, overlay=st.session_state.kmeans_overlay)
     else:
-        grid_html = render_grid_html(st.session_state.grid, visited=st.session_state.visited, path=st.session_state.path, overlay={})
+        grid_html = render_grid_html(
+            st.session_state.grid,
+            visited=st.session_state.visited,
+            path=st.session_state.path,
+            overlay={}
+        )
 
     grid_placeholder.markdown(grid_html, unsafe_allow_html=True)
 
     logs_text = "\n".join(st.session_state.logs) if st.session_state.logs else "No logs yet…"
     log_placeholder.markdown(f'<div class="logbox">{logs_text}</div>', unsafe_allow_html=True)
 
+    # IMPORTANT: update status panel every render
+    render_status_panel()
+
+# Initial render
 render_current_view()
 
 # ============================================================
@@ -888,37 +879,34 @@ render_current_view()
 # ============================================================
 
 def run_algorithm(selected_algo, delay):
-    # Reset run-specific visuals, keep current grid
+    # reset run stats (keep grid)
     st.session_state.visited = set()
     st.session_state.path = []
     st.session_state.nodes_explored = 0
     st.session_state.steps_taken = 0
     st.session_state.logs = []
+
     st.session_state.kmeans_overlay = {}
     st.session_state.kmeans_iterations = 0
     st.session_state.kmeans_centroids = []
+
     st.session_state.csp_walls = 0
     st.session_state.csp_backtracks = 0
     st.session_state.csp_path_ok = True
+
     st.session_state.minimax_turn = 0
     st.session_state.minimax_nodes = 0
     st.session_state.minimax_result = ""
 
     st.session_state.status = "Running"
     log_add(f"🚀 Running {selected_algo}...")
+    render_current_view()
 
-    # -------------------------
-    # PATHFINDING ALGORITHMS
-    # -------------------------
+    # Pathfinding
     if selected_algo in ["BFS", "DFS", "A*", "Hill Climbing"]:
         grid = st.session_state.grid
         start = find_position(grid, "A")
         goal = find_position(grid, "G")
-
-        if start is None or goal is None:
-            st.session_state.status = "Completed"
-            log_add("❌ Start or Goal missing in grid.")
-            return
 
         if selected_algo == "BFS":
             gen = bfs_steps(grid, start, goal)
@@ -929,33 +917,29 @@ def run_algorithm(selected_algo, delay):
         else:
             gen = hill_climbing_steps(grid, start, goal)
 
-        found_path = False
+        found = False
         for visited, path, msg in gen:
             st.session_state.visited = set(visited)
             st.session_state.nodes_explored = len(st.session_state.visited)
             st.session_state.steps_taken += 1
-
             if msg:
                 log_add(msg)
-
             if path:
                 st.session_state.path = list(path)
-                found_path = True
+                found = True
 
             render_current_view()
             time.sleep(delay)
 
-            if found_path:
+            if found:
                 break
 
         st.session_state.status = "Completed"
-        log_add("✅ Completed." if found_path else "⚠️ Completed (no path found).")
+        log_add("✅ Completed." if found else "⚠️ Completed (no path found).")
         render_current_view()
         return
 
-    # -------------------------
-    # MINIMAX
-    # -------------------------
+    # Minimax
     if selected_algo == "Minimax":
         mini_grid = minimax_grid_fixed_6x6()
         wizard_start = (0, 0)
@@ -967,16 +951,14 @@ def run_algorithm(selected_algo, delay):
 
         gen = minimax_game_steps(mini_grid, wizard_start, enemy_start, goal_pos, depth=3, max_turns=12)
 
-        for wizard, enemy, _path, stats, msg in gen:
+        for wizard, enemy, stats, msg in gen:
             st.session_state.minimax_wizard = wizard
             st.session_state.minimax_enemy = enemy
-
             st.session_state.steps_taken += 1
             st.session_state.minimax_turn = stats.get("turn", st.session_state.minimax_turn)
             st.session_state.minimax_nodes = stats.get("nodes", st.session_state.minimax_nodes)
             if stats.get("result"):
                 st.session_state.minimax_result = stats["result"]
-
             if msg:
                 log_add(msg)
 
@@ -991,11 +973,8 @@ def run_algorithm(selected_algo, delay):
         render_current_view()
         return
 
-    # -------------------------
     # CSP
-    # -------------------------
     if selected_algo == "CSP":
-        # CSP works on the main grid (8x8 or random)
         base_grid = st.session_state.grid
         start = find_position(base_grid, "A")
         goal = find_position(base_grid, "G")
@@ -1003,14 +982,13 @@ def run_algorithm(selected_algo, delay):
         gen = csp_steps(base_grid, start, goal, attempts_limit=8, seed=7)
 
         for new_grid, stats, msg in gen:
-            # Update the grid itself (so user sees walls being kept/removed)
             st.session_state.grid = [list(row) for row in new_grid]
             st.session_state.csp_walls = stats["walls"]
             st.session_state.csp_backtracks = stats["backtracks"]
             st.session_state.csp_path_ok = stats["path_ok"]
 
             st.session_state.steps_taken += 1
-            st.session_state.nodes_explored = stats["attempts"]  # simple stat for CSP
+            st.session_state.nodes_explored = stats["attempts"]  # simple CSP stat
 
             if msg:
                 log_add(msg)
@@ -1023,16 +1001,13 @@ def run_algorithm(selected_algo, delay):
         render_current_view()
         return
 
-    # -------------------------
-    # K-MEANS
-    # -------------------------
+    # K-Means
     if selected_algo == "K-Means":
         grid = st.session_state.grid
         k = 3
 
         gen = kmeans_steps(grid, k=k, max_iterations=20, seed=5)
 
-        # We'll build overlay coloring after each iteration
         for clusters, centroids, stats, msg in gen:
             st.session_state.steps_taken += 1
             st.session_state.kmeans_iterations = stats.get("iterations", 0)
@@ -1042,19 +1017,17 @@ def run_algorithm(selected_algo, delay):
                 log_add(msg)
 
             overlay = {}
-            if clusters is not None:
-                # color zones
+            if clusters is not None and centroids is not None:
                 for i, cells in clusters.items():
                     tag = "zone1" if i == 0 else ("zone2" if i == 1 else "zone3")
                     for p in cells:
                         overlay[p] = tag
-
-                # mark centroids
                 for cent in centroids:
                     overlay[cent] = "centroid"
 
             st.session_state.kmeans_overlay = overlay
-            st.session_state.nodes_explored = len(get_all_open_cells(grid))  # clustered cells count
+            st.session_state.nodes_explored = len(get_all_open_cells(grid))
+
             render_current_view()
             time.sleep(delay)
 
@@ -1080,7 +1053,4 @@ if st.button("🔄 Reset Everything (Clear + New Grid)", use_container_width=Tru
     log_add("🔄 Full reset done.")
     st.rerun()
 
-# ============================================================
-# FOOTER
-# ============================================================
 st.caption("AI Quest Game • Streamlit • One-file UI + Logic • BFS/DFS/A*/HC/Minimax/CSP/K-Means")
