@@ -1053,4 +1053,4 @@ if st.button("🔄 Reset Everything (Clear + New Grid)", use_container_width=Tru
     log_add("🔄 Full reset done.")
     st.rerun()
 
-st.caption("AI Quest Game • Streamlit • One-file UI + Logic • BFS/DFS/A*/HC/Minimax/CSP/K-Means")
+st.caption("All I need is one night ")
