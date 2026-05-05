@@ -1,13 +1,25 @@
 # ============================================================
-# AI QUEST GAME (Streamlit) — UI + ALL 7 Algorithms (Single File)
-# Fixes:
-# 1) Status panel updates live (uses a placeholder)
-# 2) Text visibility fixed for dark/light themes (stronger CSS)
+# AI QUEST GAME — Streamlit Modern UI + "Full Marks" Core Logic
+# ============================================================
+# What you asked:
+# - Replace old core logic with your new CSP-based dungeon generator
+# - Keep the previous modern UI (cards, status panel, logs, grid HTML)
+# - Keep everything in ONE file
+# - Beginner-friendly
+#
+# Included algorithms (from your full fixed version):
+# ✅ BFS, ✅ DFS, ✅ A*, ✅ Hill Climbing (restart)
+#
+# Notes:
+# - Grid is large (20x24). We auto-shrink cell size for UI.
+# - Path highlighting works for BFS/DFS/A*.
+# - Hill climbing returns a "walk trail" (not guaranteed shortest).
 # ============================================================
 
 import streamlit as st
 import random
 import time
+from collections import deque
 
 # -----------------------------
 # PAGE CONFIG
@@ -20,19 +32,20 @@ st.set_page_config(
 )
 
 # ============================================================
-# MODERN CSS (Cards + Grid) + VISIBILITY FIX
+# CONFIG (your "full marks" defaults)
+# ============================================================
+DEFAULT_ROWS = 20
+DEFAULT_COLS = 24
+
+# ============================================================
+# MODERN CSS (cards + grid) + visibility
 # ============================================================
 APP_CSS = """
 <style>
-.block-container { max-width: 1050px; padding-top: 1.1rem; padding-bottom: 2rem; }
+.block-container { max-width: 1150px; padding-top: 1.1rem; padding-bottom: 2rem; }
 
-/* Force readable text on our custom cards even in dark theme */
-.card, .card * {
-  color: #0f172a !important; /* slate-900 */
-}
-.hero-subtitle, .muted {
-  color: rgba(15, 23, 42, 0.70) !important;
-}
+.card, .card * { color: #0f172a !important; }
+.hero-subtitle, .muted { color: rgba(15, 23, 42, 0.70) !important; }
 
 .card {
   background: #ffffff;
@@ -46,7 +59,6 @@ APP_CSS = """
 .hero-subtitle { margin-top: 0.25rem; font-size: 1.05rem; }
 .muted { font-size: 0.95rem; }
 
-/* Background: keep dark like your screenshot */
 .stApp {
   background: radial-gradient(1200px 800px at 20% 0%, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.00) 60%),
               #070b14;
@@ -55,7 +67,7 @@ APP_CSS = """
 .grid-wrap { display: flex; justify-content: center; }
 .board {
   display: grid;
-  gap: 8px;
+  gap: 7px;
   padding: 14px;
   border-radius: 18px;
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
@@ -64,15 +76,13 @@ APP_CSS = """
 }
 
 .cell {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
   border: 1px solid rgba(0,0,0,0.06);
   user-select: none;
+  font-weight: 700;
 }
 
 .cell-empty   { background: #f1f5f9; color: #334155; }
@@ -82,14 +92,6 @@ APP_CSS = """
 
 .cell-visited { background: #dcfce7; color: #166534; border-color: rgba(22,101,52,0.22); }
 .cell-path    { background: #a7f3d0; color: #065f46; border-color: rgba(6,95,70,0.25); }
-
-.cell-wizard  { background: #ede9fe; color: #6d28d9; border-color: rgba(109,40,217,0.25); }
-.cell-enemy   { background: #fee2e2; color: #b91c1c; border-color: rgba(185,28,28,0.25); }
-
-.cell-zone1 { background: #fee2e2; color: #7f1d1d; }  /* red-ish */
-.cell-zone2 { background: #dbeafe; color: #1e3a8a; }  /* blue-ish */
-.cell-zone3 { background: #fef9c3; color: #713f12; }  /* yellow-ish */
-.cell-centroid { background: #000000; color: #ffffff; }
 
 .badges { display: flex; flex-wrap: wrap; gap: 10px; }
 .badge {
@@ -116,157 +118,181 @@ APP_CSS = """
   white-space: pre-wrap;
 }
 
-/* Make Streamlit default text readable against dark background */
 html, body, [class*="css"]  { color: #e5e7eb; }
 </style>
 """
 st.markdown(APP_CSS, unsafe_allow_html=True)
 
 # ============================================================
-# SECTION 1: GRID SETUP + HELPERS (from your notebook style)
+# SECTION 1: CSP-BASED DUNGEON GENERATION (your logic)
+# (Written in a way that supports variable rows/cols)
 # ============================================================
 
-def create_grid_fixed_8x8():
-    """Fixed 8x8 grid (consistent for viva)."""
-    return [
-        ['A', '.', '.', 'X', '.', '.', '.', '.'],
-        ['.', 'X', '.', 'X', '.', 'X', '.', '.'],
-        ['.', 'X', '.', '.', '.', 'X', '.', '.'],
-        ['.', '.', '.', 'X', '.', '.', '.', 'X'],
-        ['X', 'X', '.', 'X', '.', 'X', '.', '.'],
-        ['.', '.', '.', '.', '.', 'X', 'X', '.'],
-        ['.', 'X', 'X', 'X', '.', '.', '.', '.'],
-        ['.', '.', '.', '.', '.', 'X', '.', 'G'],
-    ]
+def create_empty_dungeon(rows, cols):
+    """Create grid filled with walls."""
+    return [["X" for _ in range(cols)] for _ in range(rows)]
 
-def generate_grid(n, wall_prob=0.22):
-    """Random grid for 6/8/10/12 sizes."""
-    grid = [["." for _ in range(n)] for _ in range(n)]
-    for r in range(n):
-        for c in range(n):
-            if (r, c) in [(0, 0), (n-1, n-1)]:
-                continue
-            if random.random() < wall_prob:
-                grid[r][c] = "X"
-    grid[0][0] = "A"
-    grid[n-1][n-1] = "G"
+def carve_guaranteed_path(grid, start, goal):
+    """Carve a path from start to goal."""
+    rows, cols = len(grid), len(grid[0])
+    r, c = start
+    grid[r][c] = "."
+
+    while (r, c) != goal:
+        if random.random() < 0.5:
+            if c < cols - 1:
+                c += 1
+        else:
+            if r < rows - 1:
+                r += 1
+        grid[r][c] = "."
+
+def add_random_openings(grid, prob=0.25):
+    """Add random walkable cells."""
+    rows, cols = len(grid), len(grid[0])
+    for r in range(rows):
+        for c in range(cols):
+            if random.random() < prob:
+                grid[r][c] = "."
+
+def is_valid(grid, r, c):
+    rows, cols = len(grid), len(grid[0])
+    return 0 <= r < rows and 0 <= c < cols and grid[r][c] != "X"
+
+def get_neighbors(r, c, grid):
+    moves = [(-1,0),(1,0),(0,-1),(0,1)]
+    res = []
+    for dr, dc in moves:
+        nr, nc = r+dr, c+dc
+        if is_valid(grid, nr, nc):
+            res.append((nr,nc))
+    return res
+
+def path_exists_bfs(grid, start, goal):
+    """BFS check for CSP constraint."""
+    queue = deque([start])
+    visited = set([start])
+
+    while queue:
+        r, c = queue.popleft()
+        if (r, c) == goal:
+            return True
+        for nb in get_neighbors(r, c, grid):
+            if nb not in visited:
+                visited.add(nb)
+                queue.append(nb)
+    return False
+
+def generate_dungeon(rows, cols, open_prob=0.25, max_tries=200):
+    """Full CSP-based dungeon generation (guarantees solvable)."""
+    start = (0, 0)
+    goal = (rows - 1, cols - 1)
+
+    for _ in range(max_tries):
+        grid = create_empty_dungeon(rows, cols)
+        carve_guaranteed_path(grid, start, goal)
+        add_random_openings(grid, prob=open_prob)
+
+        if path_exists_bfs(grid, start, goal):
+            grid[start[0]][start[1]] = "A"
+            grid[goal[0]][goal[1]] = "G"
+            return grid
+
+    # fallback (should be rare)
+    grid = create_empty_dungeon(rows, cols)
+    carve_guaranteed_path(grid, start, goal)
+    grid[start[0]][start[1]] = "A"
+    grid[goal[0]][goal[1]] = "G"
     return grid
 
-def find_position(grid, symbol):
+def find_symbol(grid, symbol):
     for r in range(len(grid)):
         for c in range(len(grid[0])):
             if grid[r][c] == symbol:
                 return (r, c)
     return None
 
-def manhattan_distance(p1, p2):
-    return abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
+# ============================================================
+# SECTION 2: Algorithms (your core logic, but return logs + stats)
+# ============================================================
 
-def is_valid_move(grid, row, col):
-    num_rows = len(grid)
-    num_cols = len(grid[0])
-    if row < 0 or row >= num_rows:
-        return False
-    if col < 0 or col >= num_cols:
-        return False
-    if grid[row][col] == "X":
-        return False
-    return True
+def heuristic(a, b):
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-def get_neighbors(grid, row, col):
-    directions = [(-1,0), (1,0), (0,-1), (0,1)]
-    valid = []
-    for dr, dc in directions:
-        rr, cc = row + dr, col + dc
-        if is_valid_move(grid, rr, cc):
-            valid.append((rr, cc))
-    return valid
-
-def reconstruct_path(parent_map, start, goal):
+def reconstruct_path(parent, start, goal):
+    if goal not in parent and goal != start:
+        return []
     path = []
-    cur = goal
-    while cur != start:
-        path.append(cur)
-        cur = parent_map[cur]
+    node = goal
+    while node != start:
+        path.append(node)
+        node = parent[node]
     path.append(start)
     path.reverse()
     return path
 
-# ============================================================
-# SECTION 2–4: PATHFINDING (BFS / DFS / A* / Hill Climbing)
-# Generators for animation: yields (visited, path_or_none, message)
-# ============================================================
-
-def bfs_steps(grid, start, goal):
-    queue = [start]
+def bfs(grid, start, goal):
+    queue = deque([start])
     visited = set([start])
     parent = {}
     nodes = 0
-
-    yield visited, None, f"🚦 BFS started at {start}"
+    logs = [f"🚦 BFS started at {start}"]
 
     while queue:
-        cur = queue.pop(0)
+        cur = queue.popleft()
         nodes += 1
-        yield visited, None, f"🔍 Exploring node {cur}"
+        logs.append(f"🔍 Exploring {cur}")
 
         if cur == goal:
-            path = reconstruct_path(parent, start, goal)
-            yield visited, path, f"🏆 Goal reached! Nodes explored={nodes}, Path length={len(path)-1}"
-            return
+            logs.append("🏆 Goal reached!")
+            break
 
-        r, c = cur
-        for nb in get_neighbors(grid, r, c):
+        for nb in get_neighbors(*cur, grid):
             if nb not in visited:
                 visited.add(nb)
                 parent[nb] = cur
                 queue.append(nb)
-                yield visited, None, f"➕ Enqueue {nb}"
+                logs.append(f"➕ Enqueue {nb}")
 
-    yield visited, None, "❌ BFS failed (no path)."
+    path = reconstruct_path(parent, start, goal)
+    return visited, path, nodes, logs
 
-def dfs_steps(grid, start, goal):
+def dfs(grid, start, goal):
     stack = [start]
     visited = set([start])
     parent = {}
     nodes = 0
-
-    yield visited, None, f"🧗 DFS started at {start}"
+    logs = [f"🧗 DFS started at {start}"]
 
     while stack:
         cur = stack.pop()
         nodes += 1
-        yield visited, None, f"🔍 Exploring node {cur}"
+        logs.append(f"🔍 Exploring {cur}")
 
         if cur == goal:
-            path = reconstruct_path(parent, start, goal)
-            yield visited, path, f"🏆 Goal reached! Nodes explored={nodes}, Path length={len(path)-1}"
-            return
+            logs.append("🏆 Goal reached!")
+            break
 
-        r, c = cur
-        for nb in get_neighbors(grid, r, c):
+        for nb in get_neighbors(*cur, grid):
             if nb not in visited:
                 visited.add(nb)
                 parent[nb] = cur
                 stack.append(nb)
-                yield visited, None, f"➕ Push {nb}"
+                logs.append(f"➕ Push {nb}")
 
-    yield visited, None, "❌ DFS failed (no path)."
+    path = reconstruct_path(parent, start, goal)
+    return visited, path, nodes, logs
 
-def astar_steps(grid, start, goal):
-    open_list = []
-    h_start = manhattan_distance(start, goal)
-    open_list.append((h_start, 0, start))  # (f, g, pos)
-
+def astar(grid, start, goal):
+    open_list = [(heuristic(start, goal), 0, start)]
     visited = set()
     parent = {}
     g_cost = {start: 0}
     nodes = 0
-
-    yield visited, None, f"✨ A* started at {start} (h={h_start})"
+    logs = [f"✨ A* started at {start} (h={heuristic(start, goal)})"]
 
     while open_list:
-        open_list.sort(key=lambda x: x[0])
+        open_list.sort()
         f, g, cur = open_list.pop(0)
 
         if cur in visited:
@@ -274,331 +300,101 @@ def astar_steps(grid, start, goal):
 
         visited.add(cur)
         nodes += 1
-        h = manhattan_distance(cur, goal)
-        yield visited, None, f"🔍 Exploring {cur} with f={f}=g({g})+h({h})"
+        logs.append(f"🔍 Exploring {cur} with f={f}")
 
         if cur == goal:
-            path = reconstruct_path(parent, start, goal)
-            yield visited, path, f"🏆 Goal reached! Nodes explored={nodes}, Path length={len(path)-1}"
-            return
+            logs.append("🏆 Goal reached!")
+            break
 
-        r, c = cur
-        for nb in get_neighbors(grid, r, c):
-            if nb in visited:
-                continue
-
+        for nb in get_neighbors(*cur, grid):
             new_g = g + 1
             if nb not in g_cost or new_g < g_cost[nb]:
                 g_cost[nb] = new_g
                 parent[nb] = cur
-                f_nb = new_g + manhattan_distance(nb, goal)
-                open_list.append((f_nb, new_g, nb))
-                yield visited, None, f"➕ Add/Update {nb} with f={f_nb}"
+                open_list.append((new_g + heuristic(nb, goal), new_g, nb))
+                logs.append(f"➕ Update {nb} (f={new_g + heuristic(nb, goal)})")
 
-    yield visited, None, "❌ A* failed (no path)."
+    path = reconstruct_path(parent, start, goal)
+    return visited, path, nodes, logs
 
-def hill_climbing_steps(grid, start, goal, max_restarts=10, max_steps=200):
-    all_open = []
-    for r in range(len(grid)):
-        for c in range(len(grid[0])):
-            if grid[r][c] != "X":
-                all_open.append((r, c))
-
+def hill_climbing(grid, start, goal, max_restarts=10, max_steps=2000):
     cur = start
-    total_path = [cur]
-    visited_run = set([cur])
+    trail = [cur]
     restarts = 0
     steps = 0
+    logs = [f"⛰️ Hill Climbing started at {start}"]
 
-    yield set(total_path), None, f"⛰️ Hill Climbing started at {start}"
-
-    while steps < max_steps:
+    while cur != goal and steps < max_steps:
         steps += 1
-        cur_dist = manhattan_distance(cur, goal)
-        yield set(total_path), None, f"📍 At {cur}, distance={cur_dist}"
-
-        if cur == goal:
-            yield set(total_path), list(total_path), f"🏆 Goal reached! steps={len(total_path)-1}, restarts={restarts}"
-            return
-
-        r, c = cur
-        neighbors = get_neighbors(grid, r, c)
+        neighbors = get_neighbors(*cur, grid)
 
         best = None
-        best_dist = cur_dist
+        best_dist = heuristic(cur, goal)
+
         for nb in neighbors:
-            if nb in visited_run:
-                continue
-            d = manhattan_distance(nb, goal)
+            d = heuristic(nb, goal)
             if d < best_dist:
-                best_dist = d
                 best = nb
+                best_dist = d
 
         if best is None:
             restarts += 1
-            yield set(total_path), None, f"🧱 Stuck at {cur} (local max). Restart #{restarts}"
-
-            if restarts > max_restarts:
-                yield set(total_path), None, "❌ Too many restarts. Hill Climbing stopped."
-                return
-
-            cur = random.choice(all_open)
-            visited_run = set([cur])
-            total_path.append(cur)
-            yield set(total_path), None, f"🎲 Restarted at {cur}"
+            logs.append(f"🧱 Stuck at {cur}. Restart #{restarts}")
+            if restarts > max_restarts or not neighbors:
+                logs.append("❌ Too many restarts. Stopping.")
+                break
+            cur = random.choice(neighbors)
+            logs.append(f"🎲 Restart move to {cur}")
         else:
             cur = best
-            visited_run.add(cur)
-            total_path.append(cur)
-            yield set(total_path), None, f"➡️ Move to {cur}"
+            logs.append(f"➡️ Move to {cur}")
 
-    yield set(total_path), None, "❌ Step limit reached. Hill Climbing stopped."
+        trail.append(cur)
 
-# ============================================================
-# SECTION 6: MINIMAX (6x6 adversarial demo)
-# ============================================================
-
-def minimax_grid_fixed_6x6():
-    return [
-        ['W', '.', '.', 'X', '.', '.'],
-        ['.', 'X', '.', '.', '.', 'X'],
-        ['.', '.', '.', 'X', '.', '.'],
-        ['X', '.', 'X', '.', '.', '.'],
-        ['.', '.', '.', '.', 'X', '.'],
-        ['.', 'X', '.', '.', '.', 'G'],
-    ]
-
-def evaluate_game_state(wizard_pos, enemy_pos, goal_pos):
-    wizard_to_goal = manhattan_distance(wizard_pos, goal_pos)
-    enemy_to_wizard = manhattan_distance(enemy_pos, wizard_pos)
-
-    if wizard_pos == goal_pos:
-        return 1000
-    if wizard_pos == enemy_pos:
-        return -1000
-
-    return enemy_to_wizard - wizard_to_goal
-
-def minimax(mini_grid, wizard_pos, enemy_pos, goal_pos, depth, is_wizard_turn):
-    if depth == 0 or wizard_pos == goal_pos or wizard_pos == enemy_pos:
-        return evaluate_game_state(wizard_pos, enemy_pos, goal_pos)
-
-    wr, wc = wizard_pos
-    er, ec = enemy_pos
-
-    if is_wizard_turn:
-        best_score = -99999
-        for next_w in get_neighbors(mini_grid, wr, wc):
-            score = minimax(mini_grid, next_w, enemy_pos, goal_pos, depth - 1, False)
-            best_score = max(best_score, score)
-        return best_score
-    else:
-        best_score = 99999
-        enemy_neighbors = get_neighbors(mini_grid, er, ec)
-        if not enemy_neighbors:
-            return evaluate_game_state(wizard_pos, enemy_pos, goal_pos)
-        for next_e in enemy_neighbors:
-            score = minimax(mini_grid, wizard_pos, next_e, goal_pos, depth - 1, True)
-            best_score = min(best_score, score)
-        return best_score
-
-def minimax_game_steps(mini_grid, wizard_start, enemy_start, goal_pos, depth=3, max_turns=12):
-    wizard = wizard_start
-    enemy = enemy_start
-    nodes_eval = 0
-
-    yield wizard, enemy, {"nodes": 0, "turn": 0, "result": ""}, "⚔️ Minimax game started!"
-
-    for turn in range(1, max_turns + 1):
-        wr, wc = wizard
-        moves = get_neighbors(mini_grid, wr, wc)
-        if not moves:
-            yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": "Wizard trapped"}, "🧱 Wizard is trapped!"
-            return
-
-        best_move = None
-        best_score = -99999
-        for mv in moves:
-            nodes_eval += 1
-            score = minimax(mini_grid, mv, enemy, goal_pos, depth, False)
-            if score > best_score:
-                best_score = score
-                best_move = mv
-
-        wizard = best_move
-        yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": ""}, f"🧙 Wizard moves to {wizard} (score={best_score})"
-
-        if wizard == goal_pos:
-            yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": "Wizard wins"}, "🏆 Wizard wins! Reached goal."
-            return
-        if wizard == enemy:
-            yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": "Enemy wins"}, "💀 Enemy wins! Caught wizard."
-            return
-
-        er, ec = enemy
-        enemy_moves = get_neighbors(mini_grid, er, ec)
-        if enemy_moves:
-            best_e = None
-            best_d = 99999
-            for mv in enemy_moves:
-                d = manhattan_distance(mv, wizard)
-                if d < best_d:
-                    best_d = d
-                    best_e = mv
-            enemy = best_e
-
-        yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": ""}, f"👾 Enemy moves to {enemy} (chasing)"
-
-        if enemy == wizard:
-            yield wizard, enemy, {"nodes": nodes_eval, "turn": turn, "result": "Enemy wins"}, "💀 Enemy wins! Caught wizard."
-            return
-
-    yield wizard, enemy, {"nodes": nodes_eval, "turn": max_turns, "result": "Draw"}, "⏳ Game ended (turn limit)."
+    if cur == goal:
+        logs.append("🏆 Goal reached!")
+    return trail, restarts, logs
 
 # ============================================================
-# SECTION 7: CSP
-# ============================================================
-
-def check_path_exists_bfs(test_grid, start_pos, goal_pos):
-    queue = [start_pos]
-    visited = set([start_pos])
-
-    while queue:
-        cur = queue.pop(0)
-        if cur == goal_pos:
-            return True
-        r, c = cur
-        for nb in get_neighbors(test_grid, r, c):
-            if nb not in visited:
-                visited.add(nb)
-                queue.append(nb)
-    return False
-
-def csp_steps(base_grid, start_pos, goal_pos, attempts_limit=8, seed=7):
-    csp_grid = [list(row) for row in base_grid]
-
-    ok = check_path_exists_bfs(csp_grid, start_pos, goal_pos)
-    yield csp_grid, {"walls": 0, "backtracks": 0, "attempts": 0, "path_ok": ok}, "🧩 CSP: Initial path check..."
-
-    if not ok:
-        yield csp_grid, {"walls": 0, "backtracks": 0, "attempts": 0, "path_ok": False}, "❌ CSP: Original grid not solvable."
-        return
-
-    candidates = []
-    for r in range(len(csp_grid)):
-        for c in range(len(csp_grid[0])):
-            if csp_grid[r][c] == "." and (r, c) != start_pos and (r, c) != goal_pos:
-                candidates.append((r, c))
-
-    random.seed(seed)
-    random.shuffle(candidates)
-
-    walls = 0
-    backtracks = 0
-    attempts = 0
-
-    for pos in candidates[:attempts_limit]:
-        attempts += 1
-        r, c = pos
-        csp_grid[r][c] = "X"
-        yield csp_grid, {"walls": walls, "backtracks": backtracks, "attempts": attempts, "path_ok": True}, f"🧱 CSP: Trying wall at {pos}..."
-
-        still_ok = check_path_exists_bfs(csp_grid, start_pos, goal_pos)
-        if still_ok:
-            walls += 1
-            yield csp_grid, {"walls": walls, "backtracks": backtracks, "attempts": attempts, "path_ok": True}, f"✅ CSP: Kept wall at {pos}."
-        else:
-            csp_grid[r][c] = "."
-            backtracks += 1
-            yield csp_grid, {"walls": walls, "backtracks": backtracks, "attempts": attempts, "path_ok": True}, f"↩️ CSP: Backtrack! Removed wall at {pos}."
-
-    final_ok = check_path_exists_bfs(csp_grid, start_pos, goal_pos)
-    yield csp_grid, {"walls": walls, "backtracks": backtracks, "attempts": attempts, "path_ok": final_ok}, f"🏁 CSP done. Path ok = {final_ok}"
-
-# ============================================================
-# SECTION 8: K-MEANS
-# ============================================================
-
-def euclidean_distance(p1, p2):
-    return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
-
-def get_all_open_cells(grid):
-    open_cells = []
-    for r in range(len(grid)):
-        for c in range(len(grid[0])):
-            if grid[r][c] != "X":
-                open_cells.append((r, c))
-    return open_cells
-
-def assign_cells_to_clusters(open_cells, centroids):
-    clusters = {i: [] for i in range(len(centroids))}
-    for cell in open_cells:
-        best_i = 0
-        best_d = 99999
-        for i, cent in enumerate(centroids):
-            d = euclidean_distance(cell, cent)
-            if d < best_d:
-                best_d = d
-                best_i = i
-        clusters[best_i].append(cell)
-    return clusters
-
-def recalculate_centroids(clusters, old_centroids):
-    new_centroids = []
-    for i in clusters:
-        cells = clusters[i]
-        if not cells:
-            new_centroids.append(old_centroids[i])
-        else:
-            avg_r = sum(p[0] for p in cells) / len(cells)
-            avg_c = sum(p[1] for p in cells) / len(cells)
-            new_centroids.append((round(avg_r), round(avg_c)))
-    return new_centroids
-
-def kmeans_steps(grid, k=3, max_iterations=20, seed=5):
-    open_cells = get_all_open_cells(grid)
-    if len(open_cells) < k:
-        yield None, None, {"iterations": 0}, "❌ Not enough open cells for K-Means."
-        return
-
-    random.seed(seed)
-    centroids = random.sample(open_cells, k)
-    yield None, None, {"iterations": 0, "centroids": centroids}, f"🎯 K-Means: Initial centroids = {centroids}"
-
-    for it in range(1, max_iterations + 1):
-        clusters = assign_cells_to_clusters(open_cells, centroids)
-        new_centroids = recalculate_centroids(clusters, centroids)
-        sizes = [len(clusters[i]) for i in range(k)]
-
-        yield clusters, centroids, {"iterations": it, "centroids": centroids, "sizes": sizes}, f"🔁 Iteration {it}: sizes={sizes}, new_centroids={new_centroids}"
-
-        if new_centroids == centroids:
-            yield clusters, centroids, {"iterations": it, "centroids": centroids, "sizes": sizes}, "✅ Converged!"
-            return
-
-        centroids = new_centroids
-
-    yield clusters, centroids, {"iterations": max_iterations, "centroids": centroids}, "⏳ Max iterations reached."
-
-# ============================================================
-# UI RENDERING HELPERS
+# SECTION 3: UI helpers (Grid render)
 # ============================================================
 
 def cell_emoji(ch):
-    mapping = {"A": "🤖", "G": "🏆", "X": "⬛", "W": "🧙", "E": "👾"}
-    return mapping.get(ch, "")
+    if ch == "A":
+        return "🤖"
+    if ch == "G":
+        return "🏆"
+    if ch == "X":
+        return "⬛"
+    return ""
 
-def render_grid_html(grid, visited=None, path=None, overlay=None):
-    n = len(grid)
+def pick_cell_size(rows, cols):
+    # smaller for large boards
+    max_dim = max(rows, cols)
+    if max_dim >= 24:
+        return 26
+    if max_dim >= 20:
+        return 30
+    if max_dim >= 12:
+        return 38
+    return 44
+
+def render_grid_html(grid, visited=None, path=None):
+    rows, cols = len(grid), len(grid[0])
     visited = visited or set()
     path = path or []
-    overlay = overlay or {}
 
-    board_style = f"grid-template-columns: repeat({n}, 44px);"
+    size = pick_cell_size(rows, cols)
+    font = max(14, int(size * 0.45))
+    gap = 6 if size <= 30 else 8
+
+    board_style = f"grid-template-columns: repeat({cols}, {size}px); gap:{gap}px;"
     html = f'<div class="grid-wrap"><div class="board" style="{board_style}">'
 
-    for r in range(n):
-        for c in range(n):
+    path_set = set(path)
+
+    for r in range(rows):
+        for c in range(cols):
             ch = grid[r][c]
             pos = (r, c)
 
@@ -608,110 +404,62 @@ def render_grid_html(grid, visited=None, path=None, overlay=None):
                 klass = "cell cell-agent"
             elif ch == "G":
                 klass = "cell cell-goal"
-            elif ch == "W":
-                klass = "cell cell-wizard"
-            elif ch == "E":
-                klass = "cell cell-enemy"
             else:
-                # K-Means overlay
-                if overlay.get(pos) == "zone1":
-                    klass = "cell cell-zone1"
-                elif overlay.get(pos) == "zone2":
-                    klass = "cell cell-zone2"
-                elif overlay.get(pos) == "zone3":
-                    klass = "cell cell-zone3"
-                elif overlay.get(pos) == "centroid":
-                    klass = "cell cell-centroid"
+                if pos in path_set:
+                    klass = "cell cell-path"
+                elif pos in visited:
+                    klass = "cell cell-visited"
                 else:
-                    # pathfinding overlay
-                    if path and pos in path:
-                        klass = "cell cell-path"
-                    elif visited and pos in visited:
-                        klass = "cell cell-visited"
-                    else:
-                        klass = "cell cell-empty"
+                    klass = "cell cell-empty"
 
-            html += f'<div class="{klass}" title="{pos}">{cell_emoji(ch)}</div>'
+            html += f'<div class="{klass}" style="width:{size}px;height:{size}px;font-size:{font}px;" title="{pos}">{cell_emoji(ch)}</div>'
 
     html += "</div></div>"
     return html
 
 # ============================================================
-# SESSION STATE INIT + RESET
+# SECTION 4: Session State
 # ============================================================
 
 def init_state():
-    if "grid_size" not in st.session_state:
-        st.session_state.grid_size = 8
-    if "use_fixed_grid" not in st.session_state:
-        st.session_state.use_fixed_grid = True
+    if "rows" not in st.session_state:
+        st.session_state.rows = DEFAULT_ROWS
+    if "cols" not in st.session_state:
+        st.session_state.cols = DEFAULT_COLS
+    if "open_prob" not in st.session_state:
+        st.session_state.open_prob = 0.25
+
     if "grid" not in st.session_state:
-        st.session_state.grid = create_grid_fixed_8x8()
+        st.session_state.grid = generate_dungeon(st.session_state.rows, st.session_state.cols, st.session_state.open_prob)
+
+    if "selected_algo" not in st.session_state:
+        st.session_state.selected_algo = "BFS"
 
     if "visited" not in st.session_state:
         st.session_state.visited = set()
     if "path" not in st.session_state:
         st.session_state.path = []
-    if "status" not in st.session_state:
-        st.session_state.status = "Idle"
     if "nodes_explored" not in st.session_state:
         st.session_state.nodes_explored = 0
     if "steps_taken" not in st.session_state:
         st.session_state.steps_taken = 0
+    if "status" not in st.session_state:
+        st.session_state.status = "Idle"
     if "logs" not in st.session_state:
         st.session_state.logs = []
-    if "selected_algo" not in st.session_state:
-        st.session_state.selected_algo = "BFS"
 
-    # minimax
-    if "minimax_wizard" not in st.session_state:
-        st.session_state.minimax_wizard = (0, 0)
-    if "minimax_enemy" not in st.session_state:
-        st.session_state.minimax_enemy = (5, 0)
-    if "minimax_turn" not in st.session_state:
-        st.session_state.minimax_turn = 0
-    if "minimax_nodes" not in st.session_state:
-        st.session_state.minimax_nodes = 0
-    if "minimax_result" not in st.session_state:
-        st.session_state.minimax_result = ""
+    # Hill climbing extra
+    if "hc_restarts" not in st.session_state:
+        st.session_state.hc_restarts = 0
 
-    # csp
-    if "csp_walls" not in st.session_state:
-        st.session_state.csp_walls = 0
-    if "csp_backtracks" not in st.session_state:
-        st.session_state.csp_backtracks = 0
-    if "csp_path_ok" not in st.session_state:
-        st.session_state.csp_path_ok = True
-
-    # kmeans
-    if "kmeans_overlay" not in st.session_state:
-        st.session_state.kmeans_overlay = {}
-    if "kmeans_iterations" not in st.session_state:
-        st.session_state.kmeans_iterations = 0
-    if "kmeans_centroids" not in st.session_state:
-        st.session_state.kmeans_centroids = []
-
-def reset_visual_state():
+def reset_run_state():
     st.session_state.visited = set()
     st.session_state.path = []
-    st.session_state.status = "Idle"
     st.session_state.nodes_explored = 0
     st.session_state.steps_taken = 0
+    st.session_state.status = "Idle"
     st.session_state.logs = []
-
-    st.session_state.kmeans_overlay = {}
-    st.session_state.kmeans_iterations = 0
-    st.session_state.kmeans_centroids = []
-
-    st.session_state.csp_walls = 0
-    st.session_state.csp_backtracks = 0
-    st.session_state.csp_path_ok = True
-
-    st.session_state.minimax_turn = 0
-    st.session_state.minimax_nodes = 0
-    st.session_state.minimax_result = ""
-    st.session_state.minimax_wizard = (0, 0)
-    st.session_state.minimax_enemy = (5, 0)
+    st.session_state.hc_restarts = 0
 
 def log_add(msg):
     st.session_state.logs.append(msg)
@@ -727,9 +475,7 @@ st.markdown(
 <div class="card">
   <div class="hero-title">AI Quest Game</div>
   <div class="hero-subtitle">Visualizing AI Algorithms</div>
-  <div class="muted">
-    ✅ BFS • ✅ DFS • ✅ A* • ✅ Hill Climbing • ✅ Minimax • ✅ CSP • ✅ K-Means
-  </div>
+  <div class="muted">CSP-based dungeon generation ✅ • BFS ✅ • DFS ✅ • A* ✅ • Hill Climbing ✅</div>
 </div>
 """,
     unsafe_allow_html=True,
@@ -737,7 +483,7 @@ st.markdown(
 st.write("")
 
 # ============================================================
-# SIDEBAR CONTROLS
+# SIDEBAR (Controls) — same structure as your earlier UI
 # ============================================================
 
 with st.sidebar:
@@ -745,56 +491,43 @@ with st.sidebar:
 
     st.session_state.selected_algo = st.selectbox(
         "🤖 Select Algorithm",
-        ["BFS", "DFS", "A*", "Hill Climbing", "Minimax", "CSP", "K-Means"],
-        index=["BFS", "DFS", "A*", "Hill Climbing", "Minimax", "CSP", "K-Means"].index(st.session_state.selected_algo),
+        ["BFS", "DFS", "A*", "Hill Climbing"],
+        index=["BFS", "DFS", "A*", "Hill Climbing"].index(st.session_state.selected_algo),
     )
 
-    speed = st.slider("⏱️ Speed (delay per step)", 0.0, 0.6, 0.15, 0.05)
+    speed = st.slider("⏱️ Speed (delay per step)", 0.0, 0.6, 0.10, 0.05)
 
     st.markdown("---")
-    st.markdown("### 🧩 Grid Settings")
+    st.markdown("### 🧩 Dungeon Settings (CSP-based)")
 
-    use_fixed = st.toggle("Use fixed 8x8 grid (best for viva)", value=st.session_state.use_fixed_grid)
-    st.session_state.use_fixed_grid = use_fixed
-
-    if use_fixed:
-        st.session_state.grid_size = 8
-        wall_prob = 0.22
-        st.caption("Using your fixed 8x8 grid for consistent results.")
-    else:
-        st.session_state.grid_size = st.select_slider("Grid Size", options=[6, 8, 10, 12], value=st.session_state.grid_size)
-        wall_prob = st.slider("🧱 Wall Density (random grid)", 0.05, 0.40, 0.22, 0.01)
-
-    st.markdown("---")
+    st.session_state.rows = st.select_slider("Rows", options=[12, 16, 20, 24], value=st.session_state.rows)
+    st.session_state.cols = st.select_slider("Cols", options=[16, 20, 24, 28], value=st.session_state.cols)
+    st.session_state.open_prob = st.slider("Open cell probability", 0.10, 0.45, float(st.session_state.open_prob), 0.05)
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🧪 Generate New Grid", use_container_width=True):
-            if st.session_state.use_fixed_grid:
-                st.session_state.grid = create_grid_fixed_8x8()
-            else:
-                st.session_state.grid = generate_grid(st.session_state.grid_size, wall_prob)
-            reset_visual_state()
-            log_add("🧪 New grid generated.")
+        if st.button("🧪 Generate New Dungeon", use_container_width=True):
+            st.session_state.grid = generate_dungeon(st.session_state.rows, st.session_state.cols, st.session_state.open_prob)
+            reset_run_state()
+            log_add("🧪 New CSP-based dungeon generated.")
 
     with c2:
         if st.button("🧼 Reset", use_container_width=True):
-            reset_visual_state()
-            log_add("🧼 Reset done (kept grid).")
+            reset_run_state()
+            log_add("🧼 Reset done (kept dungeon).")
 
     run_clicked = st.button("▶️ Run Algorithm", type="primary", use_container_width=True)
 
 # ============================================================
 # MAIN LAYOUT (Grid + Status + Logs)
-# Status panel uses placeholder so it updates live
 # ============================================================
 
-left, right = st.columns([1.4, 1], gap="large")
+left, right = st.columns([1.55, 1], gap="large")
 
 with left:
     st.markdown(
         '<div class="card"><h3 style="margin:0;">🗺️ Main Grid Display</h3>'
-        '<div class="muted">A=🤖, G=🏆, X=⬛ | Minimax: W=🧙, E=👾 | K-Means: Zones colored</div>'
+        '<div class="muted">A=🤖 Agent • G=🏆 Goal • X=⬛ Wall • Visited=🟩 • Path=🟢</div>'
         "</div>",
         unsafe_allow_html=True,
     )
@@ -810,31 +543,28 @@ with right:
     st.markdown("</div>", unsafe_allow_html=True)
 
 def render_status_panel():
-    path_len = (len(st.session_state.path) - 1) if st.session_state.path else 0
+    algo = st.session_state.selected_algo
 
-    extra = ""
-    if st.session_state.selected_algo == "Minimax":
-        extra += f"<div class='badge'>⚔️ <strong>Turn:</strong> {st.session_state.minimax_turn}</div>"
-        extra += f"<div class='badge'>🧮 <strong>Nodes Evaluated:</strong> {st.session_state.minimax_nodes}</div>"
-        if st.session_state.minimax_result:
-            extra += f"<div class='badge'>🏁 <strong>Result:</strong> {st.session_state.minimax_result}</div>"
-
-    if st.session_state.selected_algo == "CSP":
-        extra += f"<div class='badge'>🧱 <strong>Walls placed:</strong> {st.session_state.csp_walls}</div>"
-        extra += f"<div class='badge'>↩️ <strong>Backtracks:</strong> {st.session_state.csp_backtracks}</div>"
-        extra += f"<div class='badge'>✅ <strong>Path valid:</strong> {st.session_state.csp_path_ok}</div>"
-
-    if st.session_state.selected_algo == "K-Means":
-        extra += f"<div class='badge'>🔁 <strong>Iterations:</strong> {st.session_state.kmeans_iterations}</div>"
+    # Path length meaning:
+    # - BFS/DFS/A*: true shortest? BFS/A* yes; DFS no
+    # - Hill Climbing: steps in trail (not optimal)
+    if algo == "Hill Climbing":
+        path_label = "Trail Steps"
+        path_value = max(0, len(st.session_state.path) - 1)
+        extra = f"<div class='badge'>🔁 <strong>Restarts:</strong> {st.session_state.hc_restarts}</div>"
+    else:
+        path_label = "Path Length"
+        path_value = max(0, len(st.session_state.path) - 1)
+        extra = ""
 
     html = f"""
     <div class="card">
       <h3 style="margin:0 0 10px 0;">📊 Status Panel</h3>
       <div class="badges">
-        <div class="badge">🧠 <strong>Algorithm:</strong> {st.session_state.selected_algo}</div>
+        <div class="badge">🧠 <strong>Algorithm:</strong> {algo}</div>
         <div class="badge">📌 <strong>Status:</strong> {st.session_state.status}</div>
         <div class="badge">🧭 <strong>Nodes Explored:</strong> {st.session_state.nodes_explored}</div>
-        <div class="badge">🛤️ <strong>Path Length:</strong> {path_len}</div>
+        <div class="badge">🛤️ <strong>{path_label}:</strong> {path_value}</div>
         <div class="badge">👣 <strong>Steps Taken:</strong> {st.session_state.steps_taken}</div>
         {extra}
       </div>
@@ -842,215 +572,89 @@ def render_status_panel():
     """
     status_placeholder.markdown(html, unsafe_allow_html=True)
 
-def render_current_view():
-    algo = st.session_state.selected_algo
+def render_view():
+    grid_placeholder.markdown(
+        render_grid_html(st.session_state.grid, st.session_state.visited, st.session_state.path),
+        unsafe_allow_html=True,
+    )
 
-    if algo == "Minimax":
-        g = minimax_grid_fixed_6x6()
-        wr, wc = st.session_state.minimax_wizard
-        er, ec = st.session_state.minimax_enemy
-        display = [list(row) for row in g]
-        display[wr][wc] = "W"
-        display[er][ec] = "E"
-        grid_html = render_grid_html(display)
-    elif algo == "K-Means":
-        grid_html = render_grid_html(st.session_state.grid, overlay=st.session_state.kmeans_overlay)
-    else:
-        grid_html = render_grid_html(
-            st.session_state.grid,
-            visited=st.session_state.visited,
-            path=st.session_state.path,
-            overlay={}
-        )
-
-    grid_placeholder.markdown(grid_html, unsafe_allow_html=True)
-
-    logs_text = "\n".join(st.session_state.logs) if st.session_state.logs else "No logs yet…"
+    logs_text = "\n".join(st.session_state.logs[-250:]) if st.session_state.logs else "No logs yet…"
     log_placeholder.markdown(f'<div class="logbox">{logs_text}</div>', unsafe_allow_html=True)
 
-    # IMPORTANT: update status panel every render
     render_status_panel()
 
-# Initial render
-render_current_view()
+# initial render
+render_view()
 
 # ============================================================
-# RUN VISUALIZATION (per algorithm)
+# RUN (simple animation)
 # ============================================================
 
-def run_algorithm(selected_algo, delay):
-    # reset run stats (keep grid)
-    st.session_state.visited = set()
-    st.session_state.path = []
-    st.session_state.nodes_explored = 0
-    st.session_state.steps_taken = 0
-    st.session_state.logs = []
-
-    st.session_state.kmeans_overlay = {}
-    st.session_state.kmeans_iterations = 0
-    st.session_state.kmeans_centroids = []
-
-    st.session_state.csp_walls = 0
-    st.session_state.csp_backtracks = 0
-    st.session_state.csp_path_ok = True
-
-    st.session_state.minimax_turn = 0
-    st.session_state.minimax_nodes = 0
-    st.session_state.minimax_result = ""
-
+def run_selected_algorithm(delay):
+    reset_run_state()
     st.session_state.status = "Running"
-    log_add(f"🚀 Running {selected_algo}...")
-    render_current_view()
+    log_add(f"🚀 Running {st.session_state.selected_algo}...")
+    render_view()
 
-    # Pathfinding
-    if selected_algo in ["BFS", "DFS", "A*", "Hill Climbing"]:
-        grid = st.session_state.grid
-        start = find_position(grid, "A")
-        goal = find_position(grid, "G")
+    grid = st.session_state.grid
+    start = find_symbol(grid, "A")
+    goal = find_symbol(grid, "G")
 
-        if selected_algo == "BFS":
-            gen = bfs_steps(grid, start, goal)
-        elif selected_algo == "DFS":
-            gen = dfs_steps(grid, start, goal)
-        elif selected_algo == "A*":
-            gen = astar_steps(grid, start, goal)
-        else:
-            gen = hill_climbing_steps(grid, start, goal)
-
-        found = False
-        for visited, path, msg in gen:
-            st.session_state.visited = set(visited)
-            st.session_state.nodes_explored = len(st.session_state.visited)
-            st.session_state.steps_taken += 1
-            if msg:
-                log_add(msg)
-            if path:
-                st.session_state.path = list(path)
-                found = True
-
-            render_current_view()
-            time.sleep(delay)
-
-            if found:
-                break
-
+    # Ensure symbols exist
+    if start is None or goal is None:
         st.session_state.status = "Completed"
-        log_add("✅ Completed." if found else "⚠️ Completed (no path found).")
-        render_current_view()
+        log_add("❌ Start or Goal not found in grid.")
+        render_view()
         return
 
-    # Minimax
-    if selected_algo == "Minimax":
-        mini_grid = minimax_grid_fixed_6x6()
-        wizard_start = (0, 0)
-        enemy_start = (5, 0)
-        goal_pos = (5, 5)
+    algo = st.session_state.selected_algo
 
-        st.session_state.minimax_wizard = wizard_start
-        st.session_state.minimax_enemy = enemy_start
+    if algo == "BFS":
+        visited, path, nodes, logs = bfs(grid, start, goal)
+        st.session_state.visited = set(visited)
+        st.session_state.path = list(path)
+        st.session_state.nodes_explored = nodes
+        st.session_state.steps_taken = len(logs)
+        st.session_state.logs.extend(logs)
 
-        gen = minimax_game_steps(mini_grid, wizard_start, enemy_start, goal_pos, depth=3, max_turns=12)
+    elif algo == "DFS":
+        visited, path, nodes, logs = dfs(grid, start, goal)
+        st.session_state.visited = set(visited)
+        st.session_state.path = list(path)
+        st.session_state.nodes_explored = nodes
+        st.session_state.steps_taken = len(logs)
+        st.session_state.logs.extend(logs)
 
-        for wizard, enemy, stats, msg in gen:
-            st.session_state.minimax_wizard = wizard
-            st.session_state.minimax_enemy = enemy
-            st.session_state.steps_taken += 1
-            st.session_state.minimax_turn = stats.get("turn", st.session_state.minimax_turn)
-            st.session_state.minimax_nodes = stats.get("nodes", st.session_state.minimax_nodes)
-            if stats.get("result"):
-                st.session_state.minimax_result = stats["result"]
-            if msg:
-                log_add(msg)
+    elif algo == "A*":
+        visited, path, nodes, logs = astar(grid, start, goal)
+        st.session_state.visited = set(visited)
+        st.session_state.path = list(path)
+        st.session_state.nodes_explored = nodes
+        st.session_state.steps_taken = len(logs)
+        st.session_state.logs.extend(logs)
 
-            render_current_view()
-            time.sleep(delay)
+    else:  # Hill Climbing
+        trail, restarts, logs = hill_climbing(grid, start, goal, max_restarts=10)
+        # for visualization, we treat trail as "path"
+        st.session_state.path = list(trail)
+        st.session_state.visited = set(trail)
+        st.session_state.nodes_explored = len(set(trail))
+        st.session_state.steps_taken = len(logs)
+        st.session_state.hc_restarts = restarts
+        st.session_state.logs.extend(logs)
 
-            if st.session_state.minimax_result:
-                break
+    # Optional "animation" effect: just re-render once or do quick incremental
+    render_view()
+    time.sleep(delay)
 
-        st.session_state.status = "Completed"
-        log_add("✅ Minimax completed.")
-        render_current_view()
-        return
+    st.session_state.status = "Completed"
+    log_add("✅ Completed.")
+    render_view()
 
-    # CSP
-    if selected_algo == "CSP":
-        base_grid = st.session_state.grid
-        start = find_position(base_grid, "A")
-        goal = find_position(base_grid, "G")
-
-        gen = csp_steps(base_grid, start, goal, attempts_limit=8, seed=7)
-
-        for new_grid, stats, msg in gen:
-            st.session_state.grid = [list(row) for row in new_grid]
-            st.session_state.csp_walls = stats["walls"]
-            st.session_state.csp_backtracks = stats["backtracks"]
-            st.session_state.csp_path_ok = stats["path_ok"]
-
-            st.session_state.steps_taken += 1
-            st.session_state.nodes_explored = stats["attempts"]  # simple CSP stat
-
-            if msg:
-                log_add(msg)
-
-            render_current_view()
-            time.sleep(delay)
-
-        st.session_state.status = "Completed"
-        log_add("✅ CSP validation completed.")
-        render_current_view()
-        return
-
-    # K-Means
-    if selected_algo == "K-Means":
-        grid = st.session_state.grid
-        k = 3
-
-        gen = kmeans_steps(grid, k=k, max_iterations=20, seed=5)
-
-        for clusters, centroids, stats, msg in gen:
-            st.session_state.steps_taken += 1
-            st.session_state.kmeans_iterations = stats.get("iterations", 0)
-            st.session_state.kmeans_centroids = stats.get("centroids", [])
-
-            if msg:
-                log_add(msg)
-
-            overlay = {}
-            if clusters is not None and centroids is not None:
-                for i, cells in clusters.items():
-                    tag = "zone1" if i == 0 else ("zone2" if i == 1 else "zone3")
-                    for p in cells:
-                        overlay[p] = tag
-                for cent in centroids:
-                    overlay[cent] = "centroid"
-
-            st.session_state.kmeans_overlay = overlay
-            st.session_state.nodes_explored = len(get_all_open_cells(grid))
-
-            render_current_view()
-            time.sleep(delay)
-
-        st.session_state.status = "Completed"
-        log_add("✅ K-Means completed.")
-        render_current_view()
-        return
-
-# Trigger run
 if run_clicked:
-    run_algorithm(st.session_state.selected_algo, speed)
+    run_selected_algorithm(speed)
 
 # ============================================================
-# RESET EVERYTHING BUTTON
+# FOOTER
 # ============================================================
-st.write("")
-if st.button("🔄 Reset Everything (Clear + New Grid)", use_container_width=True):
-    if st.session_state.use_fixed_grid:
-        st.session_state.grid = create_grid_fixed_8x8()
-    else:
-        st.session_state.grid = generate_grid(st.session_state.grid_size, 0.22)
-    reset_visual_state()
-    log_add("🔄 Full reset done.")
-    st.rerun()
-
-st.caption("All I need is one night ")
+st.caption("AI Quest Game • CSP-based solvable dungeon • Modern Streamlit UI • One file")
