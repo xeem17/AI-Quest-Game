@@ -1,52 +1,36 @@
-# ============================================================
-# AI QUEST GAME — Modern Streamlit UI + CSP Dungeon + Algorithms
-# FIXES (based on your screenshot):
-# 1) Header now ALWAYS visible + properly spaced
-# 2) Board now fits inside its card (no overflow / better sizing)
-# 3) Grid is centered and responsive
-# 4) Better cell sizing for big boards (20x24) + tighter gaps
-# ============================================================
-
 import streamlit as st
 import random
 import time
 from collections import deque
 
-# -----------------------------
+# ============================================================
 # PAGE CONFIG
-# -----------------------------
+# ============================================================
 st.set_page_config(
     page_title="AI Quest Game",
     page_icon="🏆",
-    layout="wide",  # wide makes 20x24 board fit much better
+    layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # ============================================================
-# CONFIG
+# DEFAULTS
 # ============================================================
 DEFAULT_ROWS = 20
 DEFAULT_COLS = 24
 
 # ============================================================
-# MODERN CSS (header + cards + responsive board)
+# CSS (Modern UI)
 # ============================================================
 APP_CSS = """
 <style>
-/* ---------- App width & spacing ---------- */
-.block-container {
-  max-width: 1400px;
-  padding-top: 1.2rem;
-  padding-bottom: 2.0rem;
-}
+.block-container { max-width: 1400px; padding-top: 1.2rem; padding-bottom: 2.0rem; }
 
-/* ---------- Background ---------- */
 .stApp {
   background: radial-gradient(1200px 800px at 20% 0%, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.00) 60%),
               #070b14;
 }
 
-/* ---------- Card ---------- */
 .card {
   background: #ffffff;
   border: 1px solid rgba(0,0,0,0.06);
@@ -56,34 +40,14 @@ APP_CSS = """
 }
 .card, .card * { color: #0f172a !important; }
 
-.hero-title {
-  font-size: 2.2rem;
-  font-weight: 900;
-  letter-spacing: -0.02em;
-  margin: 0;
-}
-.hero-subtitle {
-  margin-top: 0.25rem;
-  font-size: 1.05rem;
-  color: rgba(15, 23, 42, 0.75) !important;
-}
+.hero-title { font-size: 2.2rem; font-weight: 900; letter-spacing: -0.02em; margin: 0; }
+.hero-subtitle { margin-top: 0.25rem; font-size: 1.05rem; color: rgba(15, 23, 42, 0.75) !important; }
 .muted { color: rgba(15, 23, 42, 0.65) !important; font-size: 0.95rem; }
 
-/* ---------- Board wrapper: prevents overflow ---------- */
-.grid-wrap {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-}
+.grid-wrap { width: 100%; display: flex; justify-content: center; }
+.board-scroll { width: 100%; overflow-x: auto; padding-bottom: 6px; }
 
-/* Board auto fits content; wrapper allows horizontal scroll if needed */
-.board-scroll {
-  width: 100%;
-  overflow-x: auto;
-  padding-bottom: 6px;
-}
-
-/* Board uses CSS variables for cell size + gap */
+/* Board uses CSS variables */
 .board {
   display: grid;
   gap: var(--gap);
@@ -108,7 +72,6 @@ APP_CSS = """
   user-select: none;
 }
 
-/* cell types */
 .cell-empty   { background: #f1f5f9; color: #334155; }
 .cell-wall    { background: #0f172a; color: #e5e7eb; }
 .cell-agent   { background: #e0f2fe; color: #0284c7; border-color: rgba(2,132,199,0.25); }
@@ -116,7 +79,6 @@ APP_CSS = """
 .cell-visited { background: #dcfce7; color: #166534; border-color: rgba(22,101,52,0.22); }
 .cell-path    { background: #86efac; color: #14532d; border-color: rgba(20,83,45,0.20); }
 
-/* Status badges */
 .badges { display: flex; flex-wrap: wrap; gap: 10px; }
 .badge {
   background: #f8fafc;
@@ -128,7 +90,6 @@ APP_CSS = """
 }
 .badge strong { color: rgba(15, 23, 42, 0.95); }
 
-/* Logs */
 .logbox {
   background: #0b1220;
   color: #e5e7eb;
@@ -143,14 +104,13 @@ APP_CSS = """
   white-space: pre-wrap;
 }
 
-/* Make Streamlit text readable on dark background */
 html, body, [class*="css"] { color: #e5e7eb; }
 </style>
 """
 st.markdown(APP_CSS, unsafe_allow_html=True)
 
 # ============================================================
-# CSP-BASED DUNGEON GENERATION (your logic, generalized)
+# CSP-BASED DUNGEON GENERATION
 # ============================================================
 
 def create_empty_dungeon(rows, cols):
@@ -186,20 +146,20 @@ def get_neighbors(r, c, grid):
     for dr, dc in moves:
         nr, nc = r+dr, c+dc
         if is_valid(grid, nr, nc):
-            res.append((nr,nc))
+            res.append((nr, nc))
     return res
 
 def path_exists_bfs(grid, start, goal):
-    queue = deque([start])
+    q = deque([start])
     visited = set([start])
-    while queue:
-        r, c = queue.popleft()
+    while q:
+        r, c = q.popleft()
         if (r, c) == goal:
             return True
         for nb in get_neighbors(r, c, grid):
             if nb not in visited:
                 visited.add(nb)
-                queue.append(nb)
+                q.append(nb)
     return False
 
 def generate_dungeon(rows, cols, open_prob=0.25, max_tries=200):
@@ -228,7 +188,7 @@ def find_symbol(grid, sym):
     return None
 
 # ============================================================
-# ALGORITHMS (core logic)
+# ALGORITHMS
 # ============================================================
 
 def heuristic(a, b):
@@ -355,36 +315,36 @@ def hill_climbing(grid, start, goal, max_restarts=10, max_steps=3000):
     return trail, restarts, logs
 
 # ============================================================
-# UI helpers (Responsive board sizing)
+# UI: Auto cell sizing (NO slider)
 # ============================================================
 
 def cell_emoji(ch):
     return {"A": "🤖", "G": "🏆", "X": "⬛"}.get(ch, "")
 
-def compute_cell_vars(rows, cols):
+def auto_cell_size(rows, cols, target_board_width_px=780):
     """
-    Make board look neat for 20x24:
-    - smaller cells
-    - smaller gaps
+    Fix for your request:
+    - Cell size is NOT controlled by user
+    - It automatically fits the board width
+    - Bigger grid => smaller cells
+    - Smaller grid => bigger cells
     """
-    max_dim = max(rows, cols)
-    if max_dim >= 28:
-        cell = 22
-        gap = 5
-    elif max_dim >= 24:
-        cell = 24
-        gap = 5
-    elif max_dim >= 20:
-        cell = 28
-        gap = 6
-    elif max_dim >= 16:
-        cell = 32
-        gap = 7
-    else:
-        cell = 40
-        gap = 8
+    # We reserve space for gaps and padding (rough estimate)
+    # board padding left+right ~ 28px, so subtract
+    usable = max(360, target_board_width_px - 40)
 
-    font = max(12, int(cell * 0.50))
+    # choose gap based on grid size
+    max_dim = max(rows, cols)
+    gap = 5 if max_dim >= 22 else 7
+
+    # approximate cell size to fit width: cols*c + (cols-1)*gap <= usable
+    cell = (usable - (cols - 1) * gap) // cols
+
+    # clamp to keep UI clean
+    cell = int(max(18, min(42, cell)))
+
+    # font scales with cell
+    font = int(max(11, min(18, cell * 0.50)))
     return cell, gap, font
 
 def render_grid_html(grid, visited=None, path=None):
@@ -393,7 +353,7 @@ def render_grid_html(grid, visited=None, path=None):
     path = path or []
     path_set = set(path)
 
-    cell, gap, font = compute_cell_vars(rows, cols)
+    cell, gap, font = auto_cell_size(rows, cols, target_board_width_px=780)
 
     board_style = (
         f"--cell:{cell}px;--gap:{gap}px;--font:{font}px;"
@@ -475,7 +435,7 @@ def log_add(msg):
 init_state()
 
 # ============================================================
-# HEADER (fixed)
+# HEADER
 # ============================================================
 
 st.markdown(
@@ -508,6 +468,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🧩 Dungeon Settings (CSP-based)")
 
+    # Grid size sliders are allowed; cell size will auto-fit
     st.session_state.rows = st.select_slider("Rows", options=[12, 16, 20, 24], value=st.session_state.rows)
     st.session_state.cols = st.select_slider("Cols", options=[16, 20, 24, 28], value=st.session_state.cols)
     st.session_state.open_prob = st.slider("Open cell probability", 0.10, 0.45, float(st.session_state.open_prob), 0.05)
@@ -586,6 +547,16 @@ def render_view():
     log_placeholder.markdown(f'<div class="logbox">{logs_text}</div>', unsafe_allow_html=True)
     render_status_panel()
 
+# Ensure grid matches slider sizes if user changed rows/cols without regenerating yet
+def ensure_grid_size_matches():
+    g = st.session_state.grid
+    if len(g) != st.session_state.rows or len(g[0]) != st.session_state.cols:
+        st.session_state.grid = generate_dungeon(st.session_state.rows, st.session_state.cols, st.session_state.open_prob)
+        reset_run_state()
+        log_add("🔁 Grid resized → regenerated dungeon automatically.")
+
+ensure_grid_size_matches()
+
 # initial render
 render_view()
 
@@ -593,7 +564,7 @@ render_view()
 # RUN
 # ============================================================
 
-def run_selected_algorithm(delay):
+def run_selected_algorithm():
     reset_run_state()
     st.session_state.status = "Running"
     log_add(f"🚀 Running {st.session_state.selected_algo}...")
@@ -647,9 +618,9 @@ def run_selected_algorithm(delay):
     st.session_state.status = "Completed"
     log_add("✅ Completed.")
     render_view()
-    time.sleep(delay)
 
 if run_clicked:
-    run_selected_algorithm(speed)
+    run_selected_algorithm()
+    time.sleep(speed)
 
-st.caption("AI Quest Game • Responsive board + fixed header • One file")
+st.caption("AI Quest Game • Auto-resizing grid cells • No cell-size slider • One file")
