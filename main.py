@@ -71,21 +71,17 @@ APP_CSS = """
   font-weight: 800;
 }
 
-/* base cell types */
 .cell-empty   { background: #f1f5f9; color: #334155; }
 .cell-wall    { background: #0f172a; color: #e5e7eb; }
 .cell-agent   { background: #e0f2fe; color: #0284c7; border-color: rgba(2,132,199,0.25); }
 .cell-goal    { background: #fef3c7; color: #b45309; border-color: rgba(180,83,9,0.25); }
 
-/* overlays */
 .cell-visited { background: #dcfce7; color: #166534; border-color: rgba(22,101,52,0.22); }
 .cell-path    { background: #86efac; color: #14532d; border-color: rgba(20,83,45,0.20); }
 
-/* minimax */
 .cell-wizard  { background: #ede9fe; color: #6d28d9; border-color: rgba(109,40,217,0.25); }
 .cell-enemy   { background: #fee2e2; color: #b91c1c; border-color: rgba(185,28,28,0.25); }
 
-/* kmeans zones */
 .cell-zone1 { background: #fee2e2; color: #7f1d1d; }
 .cell-zone2 { background: #dbeafe; color: #1e3a8a; }
 .cell-zone3 { background: #fef9c3; color: #713f12; }
@@ -116,14 +112,13 @@ APP_CSS = """
   white-space: pre-wrap;
 }
 
-/* Make Streamlit text readable on dark background */
 html, body, [class*="css"] { color: #e5e7eb; }
 </style>
 """
 st.markdown(APP_CSS, unsafe_allow_html=True)
 
 # ============================================================
-# CSP-BASED DUNGEON GENERATION (your logic, generalized)
+# CSP-BASED DUNGEON GENERATION
 # ============================================================
 
 def create_empty_dungeon(rows, cols):
@@ -133,6 +128,7 @@ def carve_guaranteed_path(grid, start, goal):
     rows, cols = len(grid), len(grid[0])
     r, c = start
     grid[r][c] = "."
+
     while (r, c) != goal:
         if random.random() < 0.5:
             if c < cols - 1:
@@ -175,17 +171,21 @@ def path_exists_bfs(grid, start, goal):
                 q.append(nb)
     return False
 
-def generate_dungeon(rows, cols, open_prob=0.25, max_tries=200):
+def generate_dungeon(rows, cols, open_prob=0.25, max_tries=250):
     start = (0, 0)
     goal = (rows - 1, cols - 1)
+
     for _ in range(max_tries):
         grid = create_empty_dungeon(rows, cols)
         carve_guaranteed_path(grid, start, goal)
         add_random_openings(grid, prob=open_prob)
+
         if path_exists_bfs(grid, start, goal):
             grid[start[0]][start[1]] = "A"
             grid[goal[0]][goal[1]] = "G"
             return grid
+
+    # fallback
     grid = create_empty_dungeon(rows, cols)
     carve_guaranteed_path(grid, start, goal)
     grid[start[0]][start[1]] = "A"
@@ -200,14 +200,20 @@ def find_symbol(grid, sym):
     return None
 
 # ============================================================
-# Shared helpers for search algorithms
+# PATH + DISTANCE HELPERS
 # ============================================================
 
-def heuristic(a, b):
+def manhattan(a, b):
     return abs(a[0]-b[0]) + abs(a[1]-b[1])
 
+def heuristic(a, b):
+    return manhattan(a, b)
+
 def reconstruct_path(parent, start, goal):
-    if goal not in parent and goal != start:
+    """SAFE: returns [] if goal unreachable."""
+    if start == goal:
+        return [start]
+    if goal not in parent:
         return []
     path = []
     node = goal
@@ -219,7 +225,7 @@ def reconstruct_path(parent, start, goal):
     return path
 
 def bfs_find_path(grid, start, goal):
-    """Used by CSP proof path highlighting."""
+    """Used for CSP proof path highlight."""
     q = deque([start])
     visited = set([start])
     parent = {}
@@ -235,7 +241,7 @@ def bfs_find_path(grid, start, goal):
     return []
 
 # ============================================================
-# Algorithms (7)
+# ALGORITHMS (7)
 # ============================================================
 
 def bfs(grid, start, goal):
@@ -244,19 +250,27 @@ def bfs(grid, start, goal):
     parent = {}
     nodes = 0
     logs = [f"🚦 BFS started at {start}"]
+    found_goal = False
+
     while q:
         cur = q.popleft()
         nodes += 1
         logs.append(f"🔍 Exploring {cur}")
+
         if cur == goal:
+            found_goal = True
             logs.append("🏆 Goal reached!")
             break
+
         for nb in get_neighbors(*cur, grid):
             if nb not in visited:
                 visited.add(nb)
                 parent[nb] = cur
                 q.append(nb)
-    path = reconstruct_path(parent, start, goal)
+
+    path = reconstruct_path(parent, start, goal) if found_goal else []
+    if not found_goal:
+        logs.append("❌ Goal not reached (no path).")
     return visited, path, nodes, logs
 
 def dfs(grid, start, goal):
@@ -265,19 +279,27 @@ def dfs(grid, start, goal):
     parent = {}
     nodes = 0
     logs = [f"🧗 DFS started at {start}"]
+    found_goal = False
+
     while stack:
         cur = stack.pop()
         nodes += 1
         logs.append(f"🔍 Exploring {cur}")
+
         if cur == goal:
+            found_goal = True
             logs.append("🏆 Goal reached!")
             break
+
         for nb in get_neighbors(*cur, grid):
             if nb not in visited:
                 visited.add(nb)
                 parent[nb] = cur
                 stack.append(nb)
-    path = reconstruct_path(parent, start, goal)
+
+    path = reconstruct_path(parent, start, goal) if found_goal else []
+    if not found_goal:
+        logs.append("❌ Goal not reached (no path).")
     return visited, path, nodes, logs
 
 def astar(grid, start, goal):
@@ -287,24 +309,34 @@ def astar(grid, start, goal):
     g_cost = {start: 0}
     nodes = 0
     logs = [f"✨ A* started at {start} (h={heuristic(start, goal)})"]
+    found_goal = False
+
     while open_list:
         open_list.sort()
         f, g, cur = open_list.pop(0)
+
         if cur in visited:
             continue
+
         visited.add(cur)
         nodes += 1
         logs.append(f"🔍 Exploring {cur} with f={f}")
+
         if cur == goal:
+            found_goal = True
             logs.append("🏆 Goal reached!")
             break
+
         for nb in get_neighbors(*cur, grid):
             new_g = g + 1
             if nb not in g_cost or new_g < g_cost[nb]:
                 g_cost[nb] = new_g
                 parent[nb] = cur
                 open_list.append((new_g + heuristic(nb, goal), new_g, nb))
-    path = reconstruct_path(parent, start, goal)
+
+    path = reconstruct_path(parent, start, goal) if found_goal else []
+    if not found_goal:
+        logs.append("❌ Goal not reached (no path).")
     return visited, path, nodes, logs
 
 def hill_climbing(grid, start, goal, max_restarts=10, max_steps=3000):
@@ -313,6 +345,7 @@ def hill_climbing(grid, start, goal, max_restarts=10, max_steps=3000):
     restarts = 0
     steps = 0
     logs = [f"⛰️ Hill Climbing started at {start}"]
+
     while cur != goal and steps < max_steps:
         steps += 1
         neighbors = get_neighbors(*cur, grid)
@@ -342,11 +375,10 @@ def hill_climbing(grid, start, goal, max_restarts=10, max_steps=3000):
 
         trail.append(cur)
 
-    if cur == goal:
-        logs.append("🏆 Goal reached!")
+    logs.append("🏆 Goal reached!" if cur == goal else "⚠️ Hill climbing ended (not guaranteed).")
     return trail, restarts, logs
 
-# ----- Minimax (separate 6x6 demo) -----
+# ----- MINIMAX -----
 def minimax_grid_fixed_6x6():
     return [
         ['W', '.', '.', 'X', '.', '.'],
@@ -363,9 +395,6 @@ def evaluate_game_state(wizard_pos, enemy_pos, goal_pos):
     if wizard_pos == enemy_pos:
         return -1000
     return manhattan(wizard_pos, enemy_pos) - manhattan(wizard_pos, goal_pos)
-
-def manhattan(a, b):
-    return abs(a[0]-b[0]) + abs(a[1]-b[1])
 
 def minimax(mini_grid, wizard_pos, enemy_pos, goal_pos, depth, is_wizard_turn):
     if depth == 0 or wizard_pos == goal_pos or wizard_pos == enemy_pos:
@@ -397,12 +426,11 @@ def minimax_game(mini_grid, wizard_start, enemy_start, goal_pos, depth=3, max_tu
     logs = ["⚔️ Minimax game started!"]
 
     for turn in range(1, max_turns + 1):
-        # Wizard move (MAX)
-        wr, wc = wizard
-        moves = get_neighbors(wr, wc, mini_grid)
+        # Wizard move
+        moves = get_neighbors(wizard[0], wizard[1], mini_grid)
         if not moves:
             logs.append("🧱 Wizard trapped. Game over.")
-            return wizard, enemy, wizard_trail, enemy_trail, nodes_eval, "Wizard trapped", turn, logs
+            return wizard_trail, enemy_trail, nodes_eval, turn, "Wizard trapped", logs
 
         best_move = None
         best_score = -99999
@@ -419,14 +447,13 @@ def minimax_game(mini_grid, wizard_start, enemy_start, goal_pos, depth=3, max_tu
 
         if wizard == goal_pos:
             logs.append("🏆 Wizard wins!")
-            return wizard, enemy, wizard_trail, enemy_trail, nodes_eval, "Wizard wins", turn, logs
+            return wizard_trail, enemy_trail, nodes_eval, turn, "Wizard wins", logs
         if wizard == enemy:
             logs.append("💀 Enemy wins! (caught wizard)")
-            return wizard, enemy, wizard_trail, enemy_trail, nodes_eval, "Enemy wins", turn, logs
+            return wizard_trail, enemy_trail, nodes_eval, turn, "Enemy wins", logs
 
-        # Enemy move (simple chase)
-        er, ec = enemy
-        enemy_moves = get_neighbors(er, ec, mini_grid)
+        # Enemy chase
+        enemy_moves = get_neighbors(enemy[0], enemy[1], mini_grid)
         if enemy_moves:
             best_e = None
             best_d = 99999
@@ -441,14 +468,13 @@ def minimax_game(mini_grid, wizard_start, enemy_start, goal_pos, depth=3, max_tu
 
         if enemy == wizard:
             logs.append("💀 Enemy wins! (caught wizard)")
-            return wizard, enemy, wizard_trail, enemy_trail, nodes_eval, "Enemy wins", turn, logs
+            return wizard_trail, enemy_trail, nodes_eval, turn, "Enemy wins", logs
 
     logs.append("⏳ Draw (turn limit).")
-    return wizard, enemy, wizard_trail, enemy_trail, nodes_eval, "Draw", max_turns, logs
+    return wizard_trail, enemy_trail, nodes_eval, max_turns, "Draw", logs
 
-# ----- CSP demo on current dungeon -----
+# ----- CSP (demo) -----
 def csp_validate_and_prove_path(grid):
-    """Show CSP idea: constraint is 'a path must exist'. Return proof path using BFS."""
     start = find_symbol(grid, "A")
     goal = find_symbol(grid, "G")
     if start is None or goal is None:
@@ -457,10 +483,10 @@ def csp_validate_and_prove_path(grid):
     logs = [f"🧩 CSP: Solvable constraint check = {ok}"]
     proof = bfs_find_path(grid, start, goal) if ok else []
     if proof:
-        logs.append(f"✅ CSP: Proof path found by BFS. Length={len(proof)-1}")
+        logs.append(f"✅ CSP: Proof BFS path length={len(proof)-1}")
     return ok, proof, logs
 
-# ----- K-Means clustering -----
+# ----- K-Means -----
 def euclidean(p1, p2):
     return ((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2) ** 0.5
 
@@ -523,7 +549,7 @@ def run_kmeans(grid, k=3, max_iter=20, seed=5):
     return clusters, centroids, max_iter, logs
 
 # ============================================================
-# UI: Auto cell sizing (NOT a slider)
+# UI: auto cell sizing (not a slider)
 # ============================================================
 
 def cell_emoji(ch):
@@ -531,8 +557,7 @@ def cell_emoji(ch):
 
 def auto_cell_size(rows, cols, target_board_width_px=760):
     usable = max(360, target_board_width_px - 40)
-    max_dim = max(rows, cols)
-    gap = 5 if max_dim >= 22 else 7
+    gap = 5 if max(rows, cols) >= 22 else 7
     cell = (usable - (cols - 1) * gap) // cols
     cell = int(max(16, min(38, cell)))
     font = int(max(11, min(18, cell * 0.52)))
@@ -556,7 +581,6 @@ def render_grid_html(grid, visited=None, path=None, overlay=None):
             ch = grid[r][c]
             pos = (r, c)
 
-            # base chars
             if ch == "X":
                 klass = "cell cell-wall"
             elif ch == "A":
@@ -568,7 +592,6 @@ def render_grid_html(grid, visited=None, path=None, overlay=None):
             elif ch == "E":
                 klass = "cell cell-enemy"
             else:
-                # kmeans overlay
                 tag = overlay.get(pos, "")
                 if tag == "zone1":
                     klass = "cell cell-zone1"
@@ -675,7 +698,6 @@ def log_add(msg):
 
 init_state()
 
-# If user changes rows/cols, auto-regenerate a matching dungeon (so grid isn't mismatched)
 def ensure_grid_size_matches():
     g = st.session_state.grid
     if len(g) != st.session_state.rows or len(g[0]) != st.session_state.cols:
@@ -691,7 +713,7 @@ st.markdown(
 <div class="card">
   <div class="hero-title">🏆 AI Quest Game</div>
   <div class="hero-subtitle">Visualizing AI Algorithms</div>
-  <div class="muted">CSP-based dungeon generation ✅ • BFS ✅ • DFS ✅ • A* ✅ • Hill Climbing ✅ • Minimax ✅ • CSP ✅ • K-Means ✅</div>
+  <div class="muted">All 7 algorithms ✅ • Modern UI ✅ • CSP solvable dungeon ✅</div>
 </div>
 """,
     unsafe_allow_html=True,
@@ -733,7 +755,6 @@ with st.sidebar:
 
     run_clicked = st.button("▶️ Run Algorithm", type="primary", use_container_width=True)
 
-# Apply size matching after sidebar changes
 ensure_grid_size_matches()
 
 # ============================================================
@@ -743,7 +764,7 @@ left, right = st.columns([1.7, 1], gap="large")
 
 with left:
     st.markdown(
-        '<div class="card"><h3 style="margin:0;">🗺️ Dungeon Board</h3>'
+        '<div class="card"><h3 style="margin:0;">🗺️ Board</h3>'
         '<div class="muted">A=🤖 • G=🏆 • X=⬛ • Visited=🟩 • Path/Trail=🟢 • Minimax: W=🧙 E=👾</div>'
         "</div>",
         unsafe_allow_html=True,
@@ -753,7 +774,6 @@ with left:
 
 with right:
     status_placeholder = st.empty()
-
     st.write("")
     st.markdown('<div class="card"><h3 style="margin:0 0 10px 0;">🧾 Log Panel</h3>', unsafe_allow_html=True)
     log_placeholder = st.empty()
@@ -762,7 +782,6 @@ with right:
 def render_status_panel():
     algo = st.session_state.selected_algo
 
-    # Path length label changes per algo
     if algo == "Hill Climbing":
         path_label = "Trail Steps"
         path_value = max(0, len(st.session_state.path) - 1)
@@ -807,7 +826,6 @@ def render_view():
 
     if algo == "Minimax":
         base = minimax_grid_fixed_6x6()
-        # overlay wizard/enemy into a copy
         wiz = st.session_state.mm_wizard_trail[-1] if st.session_state.mm_wizard_trail else (0, 0)
         ene = st.session_state.mm_enemy_trail[-1] if st.session_state.mm_enemy_trail else (5, 0)
         display = [list(row) for row in base]
@@ -828,10 +846,8 @@ def render_view():
 
     logs_text = "\n".join(st.session_state.logs[-250:]) if st.session_state.logs else "No logs yet…"
     log_placeholder.markdown(f'<div class="logbox">{logs_text}</div>', unsafe_allow_html=True)
-
     render_status_panel()
 
-# initial render
 render_view()
 
 # ============================================================
@@ -845,7 +861,6 @@ def run_selected_algorithm(delay):
 
     algo = st.session_state.selected_algo
 
-    # ---- PATHFINDING on CSP dungeon ----
     if algo in ["BFS", "DFS", "A*", "Hill Climbing", "CSP", "K-Means"]:
         grid = st.session_state.grid
         start = find_symbol(grid, "A")
@@ -892,8 +907,7 @@ def run_selected_algorithm(delay):
         elif algo == "CSP":
             ok, proof, logs = csp_validate_and_prove_path(grid)
             st.session_state.csp_ok = ok
-            st.session_state.path = list(proof)  # highlight proof path
-            st.session_state.visited = set()
+            st.session_state.path = list(proof)
             st.session_state.nodes_explored = len(proof)
             st.session_state.steps_taken = len(logs)
             st.session_state.logs.extend(logs)
@@ -905,7 +919,6 @@ def run_selected_algorithm(delay):
             st.session_state.steps_taken = len(logs)
             st.session_state.logs.extend(logs)
 
-            # build overlay colors
             overlay = {}
             for i, cells in clusters.items():
                 tag = "zone1" if i == 0 else ("zone2" if i == 1 else "zone3")
@@ -915,17 +928,11 @@ def run_selected_algorithm(delay):
                 overlay[cent] = "centroid"
             st.session_state.overlay = overlay
 
-    # ---- MINIMAX separate board ----
     if algo == "Minimax":
         mini = minimax_grid_fixed_6x6()
-        wizard_start = (0, 0)
-        enemy_start = (5, 0)
-        goal_pos = (5, 5)
-
-        wizard, enemy, wtrail, etrail, nodes_eval, result, turns, logs = minimax_game(
-            mini, wizard_start, enemy_start, goal_pos, depth=3, max_turns=12
+        wtrail, etrail, nodes_eval, turns, result, logs = minimax_game(
+            mini, (0, 0), (5, 0), (5, 5), depth=3, max_turns=12
         )
-
         st.session_state.mm_wizard_trail = wtrail
         st.session_state.mm_enemy_trail = etrail
         st.session_state.mm_nodes = nodes_eval
@@ -944,4 +951,4 @@ def run_selected_algorithm(delay):
 if run_clicked:
     run_selected_algorithm(speed)
 
-st.caption("AI Quest Game • All 7 algorithms restored • CSP-based solvable dungeon • One file")
+st.caption("AI Quest Game • FULL fixed version • All 7 algorithms • Correct path lengths • One file")
